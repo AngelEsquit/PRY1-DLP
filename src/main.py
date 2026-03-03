@@ -5,7 +5,13 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from yalex_parser import parse_regex, parse_yalex, regex_node_to_dict
+from yalex_parser import (
+    build_thompson_nfa,
+    nfa_to_dict,
+    parse_regex,
+    parse_yalex,
+    regex_node_to_dict,
+)
 
 
 def run() -> None:
@@ -15,6 +21,11 @@ def run() -> None:
         "--ast",
         action="store_true",
         help="También imprime el AST de regex para lets y alternativas del rule",
+    )
+    parser.add_argument(
+        "--nfa",
+        action="store_true",
+        help="También construye e imprime AFN (Thompson) para lets y alternativas del rule",
     )
     args = parser.parse_args()
 
@@ -45,6 +56,34 @@ def run() -> None:
         output["regex_ast"] = {
             "lets": lets_ast,
             "rule_alternatives": rule_alternatives_ast,
+        }
+
+    if args.nfa:
+        let_asts = {definition.name: parse_regex(definition.regex) for definition in spec.lets}
+
+        lets_nfa = [
+            {
+                "name": definition.name,
+                "nfa": nfa_to_dict(build_thompson_nfa(let_asts[definition.name], let_asts)),
+            }
+            for definition in spec.lets
+        ]
+
+        rule_alternatives_nfa = []
+        if spec.rule is not None:
+            for index, alternative in enumerate(spec.rule.alternatives):
+                alt_ast = parse_regex(alternative.regex)
+                rule_alternatives_nfa.append(
+                    {
+                        "index": index,
+                        "regex": alternative.regex,
+                        "nfa": nfa_to_dict(build_thompson_nfa(alt_ast, let_asts)),
+                    }
+                )
+
+        output["thompson_nfa"] = {
+            "lets": lets_nfa,
+            "rule_alternatives": rule_alternatives_nfa,
         }
 
     print(json.dumps(output, indent=2, ensure_ascii=False))

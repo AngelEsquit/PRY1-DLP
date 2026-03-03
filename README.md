@@ -59,6 +59,12 @@ Para incluir AST de expresiones regulares:
 python src/main.py examples/simple.yal --ast
 ```
 
+Para construir e imprimir AFN por Thompson:
+
+```bash
+python src/main.py examples/simple.yal --nfa
+```
+
 ## Próximos hitos
 
 1. Construcción de AFN (Thompson) desde AST.
