@@ -1,0 +1,17 @@
+{
+  (* Header opcional *)
+}
+
+let digit = ['0'-'9']
+let letter = ['a'-'z''A'-'Z']
+let ws = [' ''\t''\n']+
+
+rule tokenize [lexbuf] =
+  ws { skip() }
+| digit+ { return "INT" }
+| letter (letter | digit)* { return "ID" }
+| "+" { return "PLUS" }
+
+{
+  (* Trailer opcional *)
+}
