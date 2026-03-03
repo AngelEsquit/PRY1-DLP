@@ -65,6 +65,12 @@ Para construir e imprimir AFN por Thompson:
 python src/main.py examples/simple.yal --nfa
 ```
 
+Para construir el AFN combinado del `rule` (con prioridad por orden):
+
+```bash
+python src/main.py examples/simple.yal --combined-nfa
+```
+
 ## Próximos hitos
 
 1. Construcción de AFN (Thompson) desde AST.

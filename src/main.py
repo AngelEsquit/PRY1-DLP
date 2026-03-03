@@ -6,7 +6,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 from yalex_parser import (
+    build_combined_nfa,
     build_thompson_nfa,
+    combined_nfa_to_dict,
     nfa_to_dict,
     parse_regex,
     parse_yalex,
@@ -26,6 +28,11 @@ def run() -> None:
         "--nfa",
         action="store_true",
         help="También construye e imprime AFN (Thompson) para lets y alternativas del rule",
+    )
+    parser.add_argument(
+        "--combined-nfa",
+        action="store_true",
+        help="Construye e imprime el AFN combinado del rule con prioridad por orden",
     )
     args = parser.parse_args()
 
@@ -85,6 +92,19 @@ def run() -> None:
             "lets": lets_nfa,
             "rule_alternatives": rule_alternatives_nfa,
         }
+
+    if args.combined_nfa:
+        let_asts = {definition.name: parse_regex(definition.regex) for definition in spec.lets}
+        combined_entries: list[tuple[str, object]] = []
+
+        if spec.rule is not None:
+            for index, alternative in enumerate(spec.rule.alternatives):
+                label = alternative.action.strip() if alternative.action else f"ALT_{index}"
+                combined_entries.append((label, parse_regex(alternative.regex)))
+
+        output["combined_nfa"] = combined_nfa_to_dict(
+            build_combined_nfa(combined_entries, let_asts)
+        )
 
     print(json.dumps(output, indent=2, ensure_ascii=False))
 

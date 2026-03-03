@@ -32,6 +32,20 @@ class NFA:
 
 
 @dataclass
+class AcceptMetadata:
+    state: int
+    label: str
+    priority: int
+
+
+@dataclass
+class CombinedNFA:
+    start_state: int
+    accept_states: list[AcceptMetadata] = field(default_factory=list)
+    transitions: list[Transition] = field(default_factory=list)
+
+
+@dataclass
 class Fragment:
     start: int
     accept: int
@@ -58,6 +72,66 @@ def nfa_to_dict(nfa: NFA) -> dict:
         "start_state": nfa.start_state,
         "accept_state": nfa.accept_state,
         "states": sorted(states),
+        "transitions": [
+            {
+                "from": transition.from_state,
+                "to": transition.to_state,
+                "kind": transition.kind,
+                "payload": transition.payload,
+            }
+            for transition in nfa.transitions
+        ],
+    }
+
+
+def build_combined_nfa(
+    entries: list[tuple[str, RegexNode]],
+    definitions: dict[str, RegexNode] | None = None,
+) -> CombinedNFA:
+    builder = _ThompsonBuilder(definitions or {})
+    global_start = builder._new_state()
+    transitions: list[Transition] = []
+    accept_states: list[AcceptMetadata] = []
+
+    for priority, (label, root) in enumerate(entries):
+        fragment = builder.build(root)
+        transitions.extend(fragment.transitions)
+        transitions.append(Transition(global_start, fragment.start, "epsilon"))
+        accept_states.append(
+            AcceptMetadata(
+                state=fragment.accept,
+                label=label,
+                priority=priority,
+            )
+        )
+
+    return CombinedNFA(
+        start_state=global_start,
+        accept_states=accept_states,
+        transitions=transitions,
+    )
+
+
+def combined_nfa_to_dict(nfa: CombinedNFA) -> dict:
+    states = {nfa.start_state}
+    for transition in nfa.transitions:
+        states.add(transition.from_state)
+        states.add(transition.to_state)
+
+    for accept in nfa.accept_states:
+        states.add(accept.state)
+
+    return {
+        "start_state": nfa.start_state,
+        "states": sorted(states),
+        "accept_states": [
+            {
+                "state": accept.state,
+                "label": accept.label,
+                "priority": accept.priority,
+            }
+            for accept in nfa.accept_states
+        ],
         "transitions": [
             {
                 "from": transition.from_state,
