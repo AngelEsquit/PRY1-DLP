@@ -8,10 +8,35 @@ El archivo generado NO depende del generador (yalex_parser).
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 from pathlib import Path
 
 from .dfa import DFA, dfa_to_table
+
+
+def _clean_action(action: str) -> str | None:
+    """Procesa una acción del .yal y extrae el nombre de token.
+
+    - 'return "TOKEN"' -> 'TOKEN'
+    - 'skip()' -> None (se debe omitir)
+    - cadena vacía -> None
+    """
+    action = action.strip()
+    if not action:
+        return None
+
+    lower = action.lower()
+    if lower in ("skip", "skip()", "ignore", "whitespace"):
+        return None
+    if "skip" in lower and ("(" in lower or lower.endswith("skip")):
+        return None
+
+    m = re.match(r'''^return\s+["']([^"']+)["']\s*$''', action)
+    if m:
+        return m.group(1)
+
+    return action
 
 
 _LEXER_TEMPLATE = textwrap.dedent('''\
@@ -60,15 +85,6 @@ _LEXER_TEMPLATE = textwrap.dedent('''\
     # ---- Fin tabla ----
 
 
-    def _is_skip_action(action: str) -> bool:
-        lower = action.lower()
-        if lower in ("skip", "skip()", "ignore", "whitespace"):
-            return True
-        if "skip" in lower and ("(" in lower or lower.endswith("skip")):
-            return True
-        return False
-
-
     def _printable(ch: str) -> str:
         if ch == "\\n":
             return "\\\\n"
@@ -114,10 +130,9 @@ _LEXER_TEMPLATE = textwrap.dedent('''\
 
             if last_accept_label is not None and last_accept_pos > pos:
                 lexeme = text[pos:last_accept_pos]
-                action = last_accept_label.strip()
-                if action and not _is_skip_action(action):
+                if last_accept_label != "__SKIP__":
                     tokens.append(Token(
-                        type=action,
+                        type=last_accept_label,
                         lexeme=lexeme,
                         line=token_line,
                         col=token_col,
@@ -205,8 +220,17 @@ def generate_lexer(
     """
     tbl = dfa_to_table(dfa)
 
-    # Convertir claves a strings para JSON
-    accept_serialized = {str(k): v for k, v in tbl["accept"].items()}
+    # Pre-procesar accept labels: extraer nombre de token, marcar skips con __SKIP__
+    accept_clean: dict[str, str] = {}
+    for state_id, raw_action in tbl["accept"].items():
+        token_name = _clean_action(raw_action)
+        if token_name is not None:
+            accept_clean[str(state_id)] = token_name
+        else:
+            # Es un skip — marcarlo para que el lexer lo reconozca pero no emita token
+            accept_clean[str(state_id)] = "__SKIP__"
+
+    # Convertir tabla a strings para JSON
     table_serialized: dict[str, dict[str, int]] = {}
     for state, transitions in tbl["table"].items():
         table_serialized[str(state)] = transitions
@@ -217,7 +241,7 @@ def generate_lexer(
     source = _LEXER_TEMPLATE.format(
         header=header_code,
         start=tbl["start"],
-        accept=json.dumps(accept_serialized, ensure_ascii=False),
+        accept=json.dumps(accept_clean, ensure_ascii=False),
         table=json.dumps(table_serialized, ensure_ascii=False),
         trailer=trailer_code,
     )

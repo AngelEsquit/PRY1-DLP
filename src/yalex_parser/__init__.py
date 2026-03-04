@@ -3,6 +3,9 @@ from .parser import parse_yalex
 from .regex_ast import regex_node_to_dict
 from .regex_parser import parse_regex
 from .thompson import build_combined_nfa, build_thompson_nfa, combined_nfa_to_dict, nfa_to_dict
+from .dfa import DFA, DFAState, DFATransition, nfa_to_dfa, minimize_dfa, dfa_to_dict, dfa_to_table
+from .simulator import tokenize, Token, LexError
+from .codegen import generate_lexer
 
 __all__ = [
     "LetDefinition",
@@ -16,4 +19,15 @@ __all__ = [
     "nfa_to_dict",
     "build_combined_nfa",
     "combined_nfa_to_dict",
+    "DFA",
+    "DFAState",
+    "DFATransition",
+    "nfa_to_dfa",
+    "minimize_dfa",
+    "dfa_to_dict",
+    "dfa_to_table",
+    "tokenize",
+    "Token",
+    "LexError",
+    "generate_lexer",
 ]

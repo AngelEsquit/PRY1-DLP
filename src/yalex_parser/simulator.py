@@ -88,8 +88,9 @@ def tokenize(
             # Acciones que contienen "skip" o están vacías se ignoran
             action = last_accept_label.strip()
             if action and not _is_skip_action(action):
+                token_type = _extract_token_type(action)
                 tokens.append(Token(
-                    type=action,
+                    type=token_type,
                     lexeme=lexeme,
                     line=token_line,
                     col=token_col,
@@ -131,6 +132,17 @@ def _is_skip_action(action: str) -> bool:
     if "skip" in lower and ("(" in lower or lower.endswith("skip")):
         return True
     return False
+
+
+def _extract_token_type(action: str) -> str:
+    """Extrae el nombre del token de una acción tipo 'return \"TOKEN\"'."""
+    import re as _re
+    # Patrón: return "TOKEN" o return 'TOKEN'
+    m = _re.match(r'''^\s*return\s+["']([^"']+)["']\s*$''', action)
+    if m:
+        return m.group(1)
+    # Si no matchea, devolver la acción tal cual
+    return action
 
 
 def _printable(ch: str) -> str:
