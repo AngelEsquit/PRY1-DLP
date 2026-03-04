@@ -1,0 +1,66 @@
+struct Point {
+    int x;
+    int y;
+};
+
+const float PI = 3.14;
+int counter = 0;
+int arr[10];
+
+void swap(int a, int b) {
+    int temp = a;
+    a = b;
+    b = temp;
+}
+
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+int main() {
+    int x = 0xFF;
+    int y = 42;
+    float z = 1.5;
+
+    for (int i = 0; i < 10; i++) {
+        arr[i] = i * 2;
+        counter++;
+    }
+
+    if (x == y || x != 0) {
+        x += 10;
+        y -= 5;
+    } else {
+        x *= 2;
+        y /= 3;
+    }
+
+    while (y > 0 && x < 100) {
+        y--;
+        x++;
+        if (y % 2 == 0) {
+            continue;
+        }
+        if (x > 50) {
+            break;
+        }
+    }
+
+    int result = factorial(5);
+    Point p;
+    p.x = result;
+    p.y = counter;
+
+    bool flag = true;
+    if (!flag || result == null) {
+        return 0;
+    }
+
+    int shifted = x << 2;
+    shifted = shifted >> 1;
+
+    return result;
+}

@@ -1,0 +1,66 @@
+(* Complejidad ALTA: subconjunto de un lenguaje tipo C/Pascal *)
+(* Incluye: comentarios, strings, chars, keywords variadas, operadores compuestos *)
+
+let digit    = ['0'-'9']
+let letter   = ['a'-'z''A'-'Z']
+let hex      = ['0'-'9''a'-'f''A'-'F']
+let ws       = [' ''\t''\n''\r']+
+
+rule tokens =
+  ws                                          { skip() }
+| "if"                                        { return "IF" }
+| "else"                                      { return "ELSE" }
+| "while"                                     { return "WHILE" }
+| "for"                                       { return "FOR" }
+| "return"                                    { return "RETURN" }
+| "break"                                     { return "BREAK" }
+| "continue"                                  { return "CONTINUE" }
+| "int"                                       { return "T_INT" }
+| "float"                                     { return "T_FLOAT" }
+| "char"                                      { return "T_CHAR" }
+| "void"                                      { return "T_VOID" }
+| "struct"                                    { return "STRUCT" }
+| "const"                                     { return "CONST" }
+| "true"                                      { return "TRUE" }
+| "false"                                     { return "FALSE" }
+| "null"                                      { return "NULL_KW" }
+| letter (letter | digit | '_')*              { return "ID" }
+| digit+ '.' digit+                           { return "FLOAT_LIT" }
+| "0x" hex+                                   { return "HEX_LIT" }
+| digit+                                      { return "INT_LIT" }
+| "++"                                        { return "INC" }
+| "--"                                        { return "DEC" }
+| "+="                                        { return "PLUS_ASSIGN" }
+| "-="                                        { return "MINUS_ASSIGN" }
+| "*="                                        { return "TIMES_ASSIGN" }
+| "/="                                        { return "DIV_ASSIGN" }
+| "&&"                                        { return "AND" }
+| "||"                                        { return "OR" }
+| "=="                                        { return "EQ" }
+| "!="                                        { return "NEQ" }
+| "<="                                        { return "LEQ" }
+| ">="                                        { return "GEQ" }
+| "<<"                                        { return "LSHIFT" }
+| ">>"                                        { return "RSHIFT" }
+| '<'                                         { return "LT" }
+| '>'                                         { return "GT" }
+| '!'                                         { return "NOT" }
+| '&'                                         { return "AMPERSAND" }
+| '|'                                         { return "PIPE" }
+| '='                                         { return "ASSIGN" }
+| '+'                                         { return "PLUS" }
+| '-'                                         { return "MINUS" }
+| '*'                                         { return "TIMES" }
+| '/'                                         { return "DIVIDE" }
+| '%'                                         { return "MOD" }
+| '('                                         { return "LPAREN" }
+| ')'                                         { return "RPAREN" }
+| '{'                                         { return "LBRACE" }
+| '}'                                         { return "RBRACE" }
+| '['                                         { return "LBRACKET" }
+| ']'                                         { return "RBRACKET" }
+| ';'                                         { return "SEMI" }
+| ','                                         { return "COMMA" }
+| '.'                                         { return "DOT" }
+| ':'                                         { return "COLON" }
+| '-'                                         { return "ARROW" }

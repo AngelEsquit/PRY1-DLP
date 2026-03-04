@@ -1,0 +1,34 @@
+(* Complejidad MEDIA: lenguaje con identificadores, números, strings, keywords y operadores *)
+
+let digit  = ['0'-'9']
+let letter = ['a'-'z''A'-'Z']
+let ws     = [' ''\t''\n']+
+
+rule tokens =
+  ws                                    { skip() }
+| "if"                                  { return "IF" }
+| "else"                                { return "ELSE" }
+| "while"                               { return "WHILE" }
+| "return"                              { return "RETURN" }
+| "int"                                 { return "TYPE_INT" }
+| "float"                               { return "TYPE_FLOAT" }
+| letter (letter | digit | '_')*        { return "ID" }
+| digit+ '.' digit+                     { return "FLOAT_LIT" }
+| digit+                                { return "INT_LIT" }
+| "=="                                  { return "EQ" }
+| "!="                                  { return "NEQ" }
+| "<="                                  { return "LEQ" }
+| ">="                                  { return "GEQ" }
+| '<'                                   { return "LT" }
+| '>'                                   { return "GT" }
+| '='                                   { return "ASSIGN" }
+| '+'                                   { return "PLUS" }
+| '-'                                   { return "MINUS" }
+| '*'                                   { return "TIMES" }
+| '/'                                   { return "DIVIDE" }
+| '('                                   { return "LPAREN" }
+| ')'                                   { return "RPAREN" }
+| '{'                                   { return "LBRACE" }
+| '}'                                   { return "RBRACE" }
+| ';'                                   { return "SEMI" }
+| ','                                   { return "COMMA" }

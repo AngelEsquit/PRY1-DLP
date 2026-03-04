@@ -1,0 +1,14 @@
+(* Complejidad BAJA: reconoce enteros y operadores aritméticos básicos *)
+
+let digit = ['0'-'9']
+let ws = [' ''\t''\n']+
+
+rule tokens =
+  ws          { skip() }
+| digit+      { return "NUMBER" }
+| '+'         { return "PLUS" }
+| '-'         { return "MINUS" }
+| '*'         { return "TIMES" }
+| '/'         { return "DIV" }
+| '('         { return "LPAREN" }
+| ')'         { return "RPAREN" }
