@@ -1,0 +1,20 @@
+(* Tokens con prefijos superpuestos para probar maximal munch y prioridad *)
+
+let letter = ['a'-'z''A'-'Z']
+let digit = ['0'-'9']
+let ws = [' ''\t''\n''\r']+
+
+rule tokens =
+  ws                                  { skip() }
+| "===="                              { return "EQ4" }
+| "==="                               { return "EQ3" }
+| "=="                                { return "EQ2" }
+| "="                                 { return "EQ1" }
+| "if"                                { return "IF" }
+| "ifdef"                             { return "IFDEF" }
+| "ifelse"                            { return "IFELSE" }
+| letter (letter | digit | '_')*      { return "ID" }
+| digit+                               { return "INT" }
+| "->"                                { return "ARROW" }
+| "-"                                 { return "MINUS" }
+| ">"                                 { return "GT" }

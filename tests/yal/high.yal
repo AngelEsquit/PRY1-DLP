@@ -63,4 +63,4 @@ rule tokens =
 | ','                                         { return "COMMA" }
 | '.'                                         { return "DOT" }
 | ':'                                         { return "COLON" }
-| '-'                                         { return "ARROW" }
+| "->"                                        { return "ARROW" }

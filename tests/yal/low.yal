@@ -12,3 +12,5 @@ rule tokens =
 | '/'         { return "DIV" }
 | '('         { return "LPAREN" }
 | ')'         { return "RPAREN" }
+
+| '+' { return "PLUS" }

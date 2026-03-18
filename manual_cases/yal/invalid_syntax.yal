@@ -1,0 +1,5 @@
+let digit = ['0'-'9']
+
+rule tokens
+  digit+ { return "INT" }
+| '+' { return "PLUS" }

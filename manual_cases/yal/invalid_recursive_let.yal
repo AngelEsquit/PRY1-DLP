@@ -1,0 +1,6 @@
+let a = b
+let b = c
+let c = a
+
+rule tokens =
+  a { return "A" }

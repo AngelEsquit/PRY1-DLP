@@ -1,0 +1,6 @@
+let ws = [' ''\t''\n']+
+
+rule tokens =
+  ws { skip() }
+| 'a' { return "A" }
+| '+' { return "PLUS" }

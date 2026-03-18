@@ -26,6 +26,18 @@ class LexError:
     message: str
 
 
+@dataclass
+class TraceStep:
+    stage: str
+    position: int
+    line: int
+    col: int
+    state: int
+    char: str | None = None
+    next_state: int | None = None
+    note: str | None = None
+
+
 def tokenize(
     text: str,
     start: int,
@@ -52,8 +64,21 @@ def tokenize(
     (tokens, errors)
         Lista de tokens reconocidos y lista de errores léxicos.
     """
+    tokens, errors, _ = tokenize_with_trace(text, start, accept, table, include_trace=False)
+    return tokens, errors
+
+
+def tokenize_with_trace(
+    text: str,
+    start: int,
+    accept: dict[int, str],
+    table: dict[int, dict[str, int]],
+    *,
+    include_trace: bool = True,
+) -> tuple[list[Token], list[LexError], list[TraceStep]]:
     tokens: list[Token] = []
     errors: list[LexError] = []
+    trace: list[TraceStep] = []
 
     pos = 0
     line = 1
@@ -67,10 +92,31 @@ def tokenize(
         token_line = line
         token_col = col
 
+        if include_trace:
+            trace.append(TraceStep(
+                stage="token-start",
+                position=pos,
+                line=line,
+                col=col,
+                state=state,
+                note="Inicio de intento de token",
+            ))
+
         # Avanzar consumiendo caracteres mientras haya transiciones
         while current < len(text):
             ch = text[current]
             next_state = table.get(state, {}).get(ch)
+            if include_trace:
+                trace.append(TraceStep(
+                    stage="transition",
+                    position=current,
+                    line=line,
+                    col=col,
+                    state=state,
+                    char=ch,
+                    next_state=next_state,
+                    note="Transición" if next_state is not None else "Sin transición",
+                ))
             if next_state is None:
                 break
             state = next_state
@@ -80,6 +126,15 @@ def tokenize(
             if state in accept:
                 last_accept_pos = current
                 last_accept_label = accept[state]
+                if include_trace:
+                    trace.append(TraceStep(
+                        stage="accept",
+                        position=current,
+                        line=line,
+                        col=col,
+                        state=state,
+                        note=f"Estado de aceptación: {accept[state]}",
+                    ))
 
         if last_accept_label is not None and last_accept_pos > pos:
             lexeme = text[pos:last_accept_pos]
@@ -94,6 +149,24 @@ def tokenize(
                     lexeme=lexeme,
                     line=token_line,
                     col=token_col,
+                ))
+                if include_trace:
+                    trace.append(TraceStep(
+                        stage="emit-token",
+                        position=last_accept_pos,
+                        line=token_line,
+                        col=token_col,
+                        state=state,
+                        note=f"Emitido token {token_type}: {lexeme!r}",
+                    ))
+            elif include_trace:
+                trace.append(TraceStep(
+                    stage="skip-token",
+                    position=last_accept_pos,
+                    line=token_line,
+                    col=token_col,
+                    state=state,
+                    note=f"Lexema ignorado (skip): {lexeme!r}",
                 ))
 
             # Actualizar posición y coordenadas
@@ -113,6 +186,16 @@ def tokenize(
                 col=col,
                 message=f"Error léxico en línea {line}, columna {col}: carácter inesperado '{_printable(bad_char)}'",
             ))
+            if include_trace:
+                trace.append(TraceStep(
+                    stage="lex-error",
+                    position=pos,
+                    line=line,
+                    col=col,
+                    state=state,
+                    char=bad_char,
+                    note="Error léxico: carácter inesperado",
+                ))
             if bad_char == "\n":
                 line += 1
                 col = 1
@@ -120,7 +203,7 @@ def tokenize(
                 col += 1
             pos += 1
 
-    return tokens, errors
+    return tokens, errors, trace
 
 
 def _is_skip_action(action: str) -> bool:

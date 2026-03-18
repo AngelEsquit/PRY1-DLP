@@ -1,0 +1,17 @@
+(* Estrés de charsets, negación y diferencia *)
+
+let ws = [' ''\t''\n''\r']+
+let lower = ['a'-'z']
+let upper = ['A'-'Z']
+let letter = ["abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+let vowel = ['a''e''i''o''u''A''E''I''O''U']
+let consonant = (letter # vowel)
+let notquote = [^'"' '\n' '\r']
+
+rule tokens =
+  ws                     { skip() }
+| consonant+             { return "CONS" }
+| vowel+                 { return "VOW" }
+| notquote+              { return "TEXT" }
+| '"'                    { return "DQUOTE" }
+| '\''                  { return "SQUOTE" }

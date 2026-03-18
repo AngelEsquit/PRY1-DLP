@@ -1,0 +1,7 @@
+
+let ws = [' ''\t''\n''\r']+
+let ascii_print = [^'\n''\r']
+
+rule tokens =
+  ws           { skip() }
+| ascii_print+ { return "TXT" }

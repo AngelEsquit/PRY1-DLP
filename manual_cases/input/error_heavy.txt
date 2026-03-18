@@ -1,0 +1,5 @@
+BEGIN @@@ END
+αβγ ???
+name_1 = 42;
+$money #hash
+END!

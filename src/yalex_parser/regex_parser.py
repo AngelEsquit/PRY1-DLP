@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 from .regex_ast import (
@@ -35,12 +36,21 @@ class RegexCursor:
 
 
 def parse_regex(regex: str) -> RegexNode:
+    _ensure_recursion_limit(regex)
     cursor = RegexCursor(regex)
     node = _parse_union(cursor)
     cursor.skip_whitespace()
     if not cursor.eof():
         raise ValueError(f"Regex inválida, contenido restante en posición {cursor.pos}")
     return node
+
+
+def _ensure_recursion_limit(regex: str) -> None:
+    nesting_hint = regex.count("(") + regex.count("[")
+    required = max(1000, 1200 + nesting_hint * 8)
+    current = sys.getrecursionlimit()
+    if current < required:
+        sys.setrecursionlimit(required)
 
 
 def _parse_union(cursor: RegexCursor) -> RegexNode:

@@ -1,0 +1,13 @@
+(* Lexer intencionalmente restringido para forzar muchos errores léxicos *)
+
+let digit = ['0'-'9']
+let letter = ['a'-'z''A'-'Z']
+let ws = [' ''\t''\n''\r']+
+
+rule tokens =
+  ws                       { skip() }
+| "BEGIN"                 { return "BEGIN" }
+| "END"                   { return "END" }
+| letter (letter | digit)* { return "ID" }
+| digit+                   { return "INT" }
+| ';'                      { return "SEMI" }
