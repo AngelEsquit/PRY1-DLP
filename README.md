@@ -1,124 +1,168 @@
 # PRY1-DLP
 
-Generador de analizadores léxicos (YALex → analizador en Python),
-implementado sin librerías de regexp/autómatas.
+Generador de analizadores léxicos (YALex a lexer en Python), implementado sin librerías externas de expresiones regulares o autómatas.
 
-## Descripción
+## Resumen
 
-Este proyecto toma como entrada un archivo escrito en YALex y genera un analizador léxico
-autónomo en Python capaz de reconocer los tokens especificados o reportar errores léxicos.
+El proyecto recibe una especificación YALex y permite:
 
-## Estructura del proyecto
+- Parsear la especificación y sus regex.
+- Construir AFN y AFD minimizado.
+- Tokenizar entradas con estrategia maximal munch.
+- Generar un lexer Python autónomo.
+
+Incluye dos formas de uso:
+
+- Modo CLI interactivo en terminal.
+- App desktop estilo IDE con Tauri + React en la carpeta desktop-app.
+
+## Estructura Principal
 
 ```text
 src/
-    main.py                       # CLI principal
+    main.py                  # Punto de entrada principal
+    bridge_cli.py            # Bridge JSON para la app desktop
     yalex_parser/
-        __init__.py
-        models.py                 # Modelos del archivo YALex
-        parser.py                 # Parser de archivos .yal
-        regex_ast.py              # Nodos AST para expresiones regulares
-        regex_parser.py           # Parser de regex YALex → AST
-        thompson.py               # Construcción de Thompson (AFN)
-        dfa.py                    # Subset construction + minimización (AFD)
-        simulator.py              # Simulador AFD (maximal munch)
-        codegen.py                # Generador de código (lexer autónomo)
-    ui/
-        __init__.py
-        app.py                    # Interfaz gráfica (tkinter)
+        parser.py              # Parser de .yal
+        regex_parser.py        # Parser de regex
+        thompson.py            # Construcción AFN
+        dfa.py                 # Construcción y minimización AFD
+        simulator.py           # Tokenización con traza
+        codegen.py             # Generación de lexer Python
+
+desktop-app/
+    src/                     # Frontend React + Monaco Editor
+    src-tauri/               # Backend Tauri (comandos del sistema)
+
 examples/
-    simple.yal                    # Ejemplo básico
+    simple.yal
+
 tests/
-    yal/
-        low.yal                   # Especificación baja complejidad
-        medium.yal                # Especificación media complejidad
-        high.yal                  # Especificación alta complejidad
-    input/
-        low.txt                   # Entrada baja complejidad
-        medium.txt                # Entrada media complejidad
-        high.txt                  # Entrada alta complejidad
+    test_yalex_pipeline.py
+    test_extreme_scenarios.py
 ```
+
+## Requisitos
+
+### Motor Python
+
+- Python 3.10 o superior.
+
+### App Desktop
+
+- Node.js 18 o superior.
+- Rust toolchain estable.
+- Dependencias de compilación de Tauri para Windows (MSVC Build Tools).
 
 ## Pipeline
 
-1. **Parser YALex** — Lee el archivo `.yal` y extrae header, lets, rule y trailer.
-2. **Regex → AST** — Parsea cada expresión regular a un árbol de sintaxis abstracta.
-3. **Thompson** — Construye un AFN por cada alternativa del rule, luego los combina.
-4. **Subset Construction** — Convierte el AFN combinado en un AFD determinista.
-5. **Minimización** — Reduce el AFD mediante el algoritmo de Hopcroft.
-6. **Simulación** — Tokeniza texto de entrada con estrategia maximal munch + prioridad por orden.
-7. **Generación de código** — Produce un archivo Python autónomo con el AFD serializado.
+1. Parser YALex: extrae header, lets, rule y trailer.
+2. Regex a AST: convierte regex de lets y rule en árboles.
+3. Thompson: crea AFN por alternativa.
+4. AFN combinado: unifica alternativas con prioridades.
+5. Subset construction: convierte AFN a AFD.
+6. Minimización: reduce AFD (Hopcroft).
+7. Simulación: tokeniza texto y reporta errores léxicos.
+8. Codegen: genera lexer Python autónomo.
 
 ## Ejecución
 
-Desde la raíz del proyecto:
+Desde la raíz del repositorio.
 
-### Parsear un archivo .yal (JSON)
-
-```bash
-python src/main.py examples/simple.yal
-```
-
-### Ver el AST de expresiones regulares
+### Ver ayuda
 
 ```bash
-python src/main.py examples/simple.yal --ast
+python src/main.py --help
 ```
 
-### Construir AFN por Thompson
+Comportamiento actual:
+
+- Con --cli: menú interactivo en terminal.
+- Sin argumentos: menú interactivo en terminal.
+
+### Modo CLI (por defecto)
 
 ```bash
-python src/main.py examples/simple.yal --nfa
+python src/main.py
 ```
 
-### Construir AFN combinado
+Alias explícito:
 
 ```bash
-python src/main.py examples/simple.yal --combined-nfa
+python src/main.py --cli
 ```
 
-### Construir y visualizar AFD
-
-```bash
-python src/main.py examples/simple.yal --dfa
-```
-
-### Tokenizar un archivo de texto
-
-```bash
-python src/main.py tests/yal/low.yal --tokenize tests/input/low.txt
-python src/main.py tests/yal/medium.yal --tokenize tests/input/medium.txt
-python src/main.py tests/yal/high.yal --tokenize tests/input/high.txt
-```
-
-### Generar analizador léxico autónomo
-
-```bash
-python src/main.py tests/yal/medium.yal --generate output/lexer.py
-```
-
-El archivo generado es independiente y se ejecuta así:
+### Ejecutar lexer generado
 
 ```bash
 python output/lexer.py tests/input/medium.txt
 ```
 
-### Interfaz gráfica
+Flujo típico del menú CLI:
+
+1. Seleccionar archivo .yal.
+2. Revisar spec, AST, AFN, AFN combinado o AFD.
+3. Tokenizar entrada.
+4. Generar lexer .py.
+
+## App Desktop (Tauri + React)
+
+La app en desktop-app ofrece una experiencia tipo VS Code:
+
+- Explorer recursivo.
+- Editor en pestañas con resaltado de sintaxis (Monaco Editor).
+- Panel de resultados JSON.
+- Panel de output.
+- Acciones del pipeline: spec, ast, nfa, combinedNfa, dfa, tokenize y generate.
+- Creación inline de archivo/carpeta y selector nativo para cambiar carpeta raíz.
+
+Comandos:
 
 ```bash
-python src/main.py examples/simple.yal --gui
+cd desktop-app
+npm install
+npm run tauri dev
 ```
 
-O directamente:
+Build de frontend:
 
 ```bash
-python src/ui/app.py
+cd desktop-app
+npm run build
 ```
 
-## Restricciones cumplidas
+## Pruebas
 
-- **Sin librerías de regex**: toda la funcionalidad de expresiones regulares se implementa mediante autómatas finitos (Thompson + subset construction).
-- **Lexer independiente**: el archivo generado no depende del generador.
-- **Interfaz gráfica**: incluida con tkinter (carga `.yal`, diagrama AFD, análisis léxico).
-- **3 pares de prueba**: baja, media y alta complejidad.
+Desde la raíz:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Script de apoyo (Linux/macOS con bash):
+
+```bash
+./run_tests.sh
+./run_tests.sh 3
+```
+
+En Windows PowerShell, si python no está en PATH, usar py:
+
+```bash
+py -3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+## Solución de Problemas Rápida
+
+- Error al correr npm run tauri dev desde la raíz: ejecutar dentro de desktop-app.
+- Error de cargo o rustc no encontrado: instalar Rust y reiniciar terminal.
+- Error de linker en Windows: instalar MSVC Build Tools.
+- Puerto ocupado de Vite: cerrar instancia anterior o reiniciar la app.
+
+## Restricciones Cumplidas
+
+- Sin librerías de regex/autómatas para el motor del lexer.
+- Lexer generado autónomo.
+- Interfaces CLI y desktop.
+- Casos de prueba de baja, media y alta complejidad, además de escenarios extremos.
 

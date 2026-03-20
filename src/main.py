@@ -227,7 +227,7 @@ def run() -> None:
     parser.add_argument(
         "--cli",
         action="store_true",
-        help="Ejecuta modo terminal con menú interactivo.",
+        help="Ejecuta modo terminal con menú interactivo (ahora es el modo por defecto).",
     )
     args = parser.parse_args()
 
@@ -235,11 +235,8 @@ def run() -> None:
         _cli_menu()
         return
 
-    # Modo por defecto: UI
-    from ui.app import YALexApp
-
-    app = YALexApp()
-    app.mainloop()
+    # Modo por defecto: CLI interactivo.
+    _cli_menu()
 
 
 if __name__ == "__main__":
