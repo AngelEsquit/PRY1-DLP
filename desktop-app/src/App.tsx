@@ -1,3 +1,4 @@
+import saveIcon from "../src-tauri/icons/svg/save.svg";
 import {
   useEffect,
   useMemo,
@@ -7,9 +8,12 @@ import {
 } from "react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import {
+  copyFile,
   createDirectory,
+  deleteFile,
   getWorkspaceRoot,
   listEntries,
+  moveFile,
   pickDirectory,
   readTextFile,
   runYalex,
@@ -151,6 +155,14 @@ export function App() {
     parentDir: string;
     draftName: string;
   } | null>(null);
+  const [clipboardPath, setClipboardPath] = useState<string | null>(null);
+  const [clipboardMode, setClipboardMode] = useState<"copy" | "cut" | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
+  const [dragInProgress, setDragInProgress] = useState<boolean>(false);
+  const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
+  const [suppressNextClick, setSuppressNextClick] = useState<boolean>(false);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.path === activeTabPath) ?? null,
@@ -289,6 +301,106 @@ export function App() {
     }
     await loadDir(workspaceRoot);
     pushOutput("info", "Explorer recargado.");
+  }
+
+  function copyToClipboard(path: string) {
+    setClipboardPath(path);
+    setClipboardMode("copy");
+    setContextMenu(null);
+    pushOutput("info", `Copiado: ${getPathBaseName(path)}`);
+  }
+
+  function cutToClipboard(path: string) {
+    setClipboardPath(path);
+    setClipboardMode("cut");
+    setContextMenu(null);
+    pushOutput("info", `Cortado: ${getPathBaseName(path)}`);
+  }
+
+  async function pasteFromClipboard(targetDir: string) {
+    if (!clipboardPath || !clipboardMode) {
+      pushOutput("error", "No hay nada en el portapapeles.");
+      return;
+    }
+
+    try {
+      const fileName = getPathBaseName(clipboardPath);
+      const destPath = joinPath(targetDir, fileName);
+
+      if (clipboardMode === "copy") {
+        await copyFile(clipboardPath, destPath);
+        pushOutput("ok", `Copiado: ${fileName}`);
+      } else if (clipboardMode === "cut") {
+        await moveFile(clipboardPath, destPath);
+        pushOutput("ok", `Movido: ${fileName}`);
+        setClipboardPath(null);
+        setClipboardMode(null);
+      }
+
+      await loadDir(targetDir);
+      const parentDir = getParentPath(clipboardPath);
+      if (parentDir && parentDir !== targetDir) {
+        await loadDir(parentDir);
+      }
+    } catch (error) {
+      pushOutput("error", `Error al pegar: ${String(error)}`);
+    }
+  }
+
+  async function movePathToDirectory(sourcePath: string, targetDir: string) {
+    const normalizedSource = sourcePath.replace(/[\\/]+$/, "");
+    const normalizedTarget = targetDir.replace(/[\\/]+$/, "");
+    const fileName = getPathBaseName(sourcePath);
+
+    if (!normalizedSource || !normalizedTarget) {
+      return;
+    }
+
+    const lowerSource = normalizedSource.toLowerCase();
+    const lowerTarget = normalizedTarget.toLowerCase();
+    if (lowerTarget === lowerSource || lowerTarget.startsWith(`${lowerSource}\\`)) {
+      pushOutput("error", "No se puede mover una carpeta dentro de si misma.");
+      return;
+    }
+
+    const parentDir = getParentPath(sourcePath);
+    if (parentDir && parentDir.toLowerCase() === lowerTarget) {
+      pushOutput("info", "El elemento ya se encuentra en ese directorio.");
+      return;
+    }
+
+    try {
+      const destPath = joinPath(targetDir, fileName);
+      await moveFile(sourcePath, destPath);
+      pushOutput("ok", `Movido: ${fileName}`);
+
+      await loadDir(targetDir);
+      if (parentDir && parentDir !== targetDir) {
+        await loadDir(parentDir);
+      }
+    } catch (error) {
+      pushOutput("error", `Error al mover ${fileName}: ${String(error)}`);
+    }
+  }
+
+  async function deleteFileOrFolder(path: string) {
+    if (!confirm(`¿Eliminar ${getPathBaseName(path)}?`)) {
+      return;
+    }
+
+    try {
+      await deleteFile(path);
+      pushOutput("ok", `Eliminado: ${getPathBaseName(path)}`);
+      const parentDir = getParentPath(path);
+      if (parentDir) {
+        await loadDir(parentDir);
+      }
+      if (selectedPath === path) {
+        setSelectedPath(parentDir || workspaceRoot);
+      }
+    } catch (error) {
+      pushOutput("error", `Error al eliminar: ${String(error)}`);
+    }
   }
 
   async function toggleDir(path: string) {
@@ -444,13 +556,49 @@ export function App() {
     children.forEach((entry) => {
       const isOpen = Boolean(expandedDirs[entry.path]);
       const isSelected = selectedPath === entry.path;
+      const isDraggedOver = dragOverPath === entry.path;
+      const isDragSource = dragInProgress && draggedPath === entry.path;
       if (entry.isDir) {
         rows.push(
-          <div key={entry.path}>
+          <div
+            key={entry.path}
+            onMouseEnter={() => {
+              if (dragInProgress && draggedPath && draggedPath !== entry.path) {
+                setDragOverPath(entry.path);
+              }
+            }}
+            onMouseLeave={() => {
+              if (dragOverPath === entry.path) {
+                setDragOverPath(null);
+              }
+            }}
+          >
             <button
-              className={`entry ${isSelected ? "selected" : ""}`}
+              className={`entry ${isSelected ? "selected" : ""} ${isDraggedOver ? "drag-over" : ""} ${isDragSource ? "drag-source" : ""}`}
               style={{ paddingLeft: `${10 + depth * 14}px` }}
-              onClick={() => void toggleDir(entry.path)}
+              onMouseEnter={() => {
+                if (dragInProgress && draggedPath && draggedPath !== entry.path) {
+                  setDragOverPath(entry.path);
+                }
+              }}
+              onClick={() => {
+                if (suppressNextClick) {
+                  setSuppressNextClick(false);
+                  return;
+                }
+                void toggleDir(entry.path);
+              }}
+              onMouseDown={(e) => {
+                if (e.button === 0) {
+                  setDraggedPath(entry.path);
+                  setDragStartPoint({ x: e.clientX, y: e.clientY });
+                  setDragOverPath(null);
+                }
+              }}
+              onContextMenu={(e: ReactMouseEvent<HTMLButtonElement>) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, path: entry.path });
+              }}
             >
               <span className="entry-kind">{isOpen ? "v" : ">"}</span>
               <span>{entry.name}</span>
@@ -464,13 +612,28 @@ export function App() {
       rows.push(
         <button
           key={entry.path}
-          className={`entry ${isSelected ? "selected" : ""}`}
+          className={`entry ${isSelected ? "selected" : ""} ${isDragSource ? "drag-source" : ""}`}
           style={{ paddingLeft: `${10 + depth * 14}px` }}
           onClick={() => {
+            if (suppressNextClick) {
+              setSuppressNextClick(false);
+              return;
+            }
             setSelectedPath(entry.path);
             if (isTextFile(entry.name)) {
               void openFile(entry.path);
             }
+          }}
+          onMouseDown={(e) => {
+            if (e.button === 0) {
+              setDraggedPath(entry.path);
+              setDragStartPoint({ x: e.clientX, y: e.clientY });
+              setDragOverPath(null);
+            }
+          }}
+          onContextMenu={(e: ReactMouseEvent<HTMLButtonElement>) => {
+            e.preventDefault();
+            setContextMenu({ x: e.clientX, y: e.clientY, path: entry.path });
           }}
         >
           <span className="entry-kind">FILE</span>
@@ -528,12 +691,53 @@ export function App() {
     };
   }, [isResizingPanels]);
 
+  useEffect(() => {
+    function onGlobalMouseMove(event: globalThis.MouseEvent) {
+      if (!dragStartPoint || !draggedPath || dragInProgress) {
+        return;
+      }
+      const dx = event.clientX - dragStartPoint.x;
+      const dy = event.clientY - dragStartPoint.y;
+      if (Math.hypot(dx, dy) >= 4) {
+        setDragInProgress(true);
+      }
+    }
+
+    function onGlobalMouseUp() {
+      if (dragInProgress && draggedPath && dragOverPath && draggedPath !== dragOverPath) {
+        void movePathToDirectory(draggedPath, dragOverPath);
+        setSuppressNextClick(true);
+      }
+
+      setDragInProgress(false);
+      setDraggedPath(null);
+      setDragOverPath(null);
+      setDragStartPoint(null);
+    }
+
+    window.addEventListener("mousemove", onGlobalMouseMove);
+    window.addEventListener("mouseup", onGlobalMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onGlobalMouseMove);
+      window.removeEventListener("mouseup", onGlobalMouseUp);
+    };
+  }, [dragInProgress, draggedPath, dragOverPath, dragStartPoint]);
+
   return (
     <div className="shell">
       <header className="topbar">
         <h1>YALex Studio</h1>
         <div className="topbar-actions">
-          <button onClick={() => void saveActiveTab()}>Guardar</button>
+          <button className="topbar-action-btn" onClick={() => void saveActiveTab()}>
+            <span
+              className="panel-icon topbar-icon"
+              style={{
+                WebkitMaskImage: `url(${saveIcon})`,
+                maskImage: `url(${saveIcon})`,
+              }}
+            />
+            Guardar
+          </button>
           <button onClick={() => void refreshExplorerRoot()}>Refrescar Explorer</button>
         </div>
       </header>
@@ -696,6 +900,25 @@ export function App() {
           </div>
         </section>
       </main>
+
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ position: "fixed", left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <button onClick={() => copyToClipboard(contextMenu.path)}>Copiar</button>
+          <button onClick={() => cutToClipboard(contextMenu.path)}>Cortar</button>
+          <button
+            onClick={() => void pasteFromClipboard(contextMenu.path)}
+            disabled={!clipboardPath || !clipboardMode}
+          >
+            Pegar
+          </button>
+          <hr />
+          <button onClick={() => void deleteFileOrFolder(contextMenu.path)}>Eliminar</button>
+        </div>
+      )}
 
       <section className="output-panel">
         <div className="panel-title">Output</div>

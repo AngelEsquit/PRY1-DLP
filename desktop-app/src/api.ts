@@ -25,6 +25,18 @@ export async function pickDirectory(): Promise<string | null> {
   return invoke("pick_directory");
 }
 
+export async function copyFile(src: string, dest: string): Promise<void> {
+  await invoke("copy_file", { src, dest });
+}
+
+export async function moveFile(src: string, dest: string): Promise<void> {
+  await invoke("move_file", { src, dest });
+}
+
+export async function deleteFile(path: string): Promise<void> {
+  await invoke("delete_file", { path });
+}
+
 export async function runYalex(payload: {
   action: YalexAction;
   yalPath?: string;

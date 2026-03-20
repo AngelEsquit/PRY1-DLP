@@ -79,6 +79,81 @@ fn pick_directory() -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn copy_file(src: String, dest: String) -> Result<(), String> {
+    let src_path = Path::new(&src);
+    let dest_path = Path::new(&dest);
+
+    if !src_path.exists() {
+        return Err(format!("Archivo origen no existe: {src}"));
+    }
+
+    if src_path.is_dir() {
+        copy_dir_recursive(src_path, dest_path)
+            .map_err(|e| format!("Error copiando directorio: {e}"))
+    } else {
+        fs::copy(src_path, dest_path)
+            .map_err(|e| format!("Error copiando archivo: {e}"))?;
+        Ok(())
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let dest_path = dest.join(&file_name);
+
+        if path.is_dir() {
+            copy_dir_recursive(&path, &dest_path)?;
+        } else {
+            fs::copy(&path, &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn move_file(src: String, dest: String) -> Result<(), String> {
+    let src_path = Path::new(&src);
+    let dest_path = Path::new(&dest);
+
+    if !src_path.exists() {
+        return Err(format!("Archivo/carpeta origen no existe: {src}"));
+    }
+
+    let final_dest = if dest_path.is_dir() && dest_path.exists() {
+        let file_name = src_path
+            .file_name()
+            .ok_or_else(|| "No se pudo obtener nombre del archivo".to_string())?;
+        dest_path.join(file_name)
+    } else {
+        dest_path.to_path_buf()
+    };
+
+    fs::rename(src_path, &final_dest)
+        .map_err(|e| format!("Error moviendo archivo: {e}"))
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    let file_path = Path::new(&path);
+
+    if !file_path.exists() {
+        return Err(format!("Archivo/carpeta no existe: {path}"));
+    }
+
+    if file_path.is_dir() {
+        fs::remove_dir_all(file_path)
+            .map_err(|e| format!("Error eliminando directorio: {e}"))
+    } else {
+        fs::remove_file(file_path)
+            .map_err(|e| format!("Error eliminando archivo: {e}"))
+    }
+}
+
 fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<String, String> {
     let mut child = Command::new(program)
         .args(args)
@@ -128,7 +203,6 @@ fn run_yalex_bridge(payload_json: String) -> Result<String, String> {
     run_python_command("py", &["-3", script_str], &payload_json)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -138,6 +212,9 @@ pub fn run() {
             write_text_file,
             create_directory,
             pick_directory,
+            copy_file,
+            move_file,
+            delete_file,
             run_yalex_bridge
         ])
         .run(tauri::generate_context!())
