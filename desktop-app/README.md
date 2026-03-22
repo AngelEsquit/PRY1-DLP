@@ -4,8 +4,8 @@ Interfaz desktop reutilizable para proyectos de análisis léxico.
 
 ## Objetivo
 
-Proveer un layout estilo IDE (explorer, pestañas, output) sobre el motor Python actual,
-sin duplicar la lógica de parsing/autómatas.
+Proveer una interfaz desktop clara y rápida de usar, con apariencia tipo editor profesional,
+enfocada únicamente en el flujo principal del pipeline YALex.
 
 ## Arquitectura
 
@@ -18,17 +18,31 @@ sin duplicar la lógica de parsing/autómatas.
 
 ```bash
 npm install
+npm run tauri -- dev
+```
+
+Alternativa compatible en muchos entornos:
+
+```bash
 npm run tauri dev
 ```
 
 ## Funcionalidad soportada
 
-- Navegar archivos del workspace con explorer recursivo (expand/collapse).
-- Abrir/editar/guardar archivos de texto.
-- Ejecutar acciones YALex: `spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`.
-- Tokenizar por archivo o por texto directo desde la interfaz.
-- Vista dividida editor + resultados JSON de la última ejecución.
-- Mostrar resultados en panel output en formato JSON legible.
+- Explorer recursivo con expand/collapse.
+- Apertura y edición de archivos de texto en pestañas.
+- Guardado manual del archivo activo.
+- Ejecución del pipeline con una acción activa por vez: `spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`.
+- Campos contextuales por acción (solo se muestran cuando aplican).
+- Panel `Resultado JSON` para respuesta estructurada y panel `Output` para estado/errores.
+- Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia local de tamaños.
+
+## Flujo de uso rápido
+
+1. Abre un archivo `.yal` desde el explorer.
+2. Selecciona la acción en el panel `Pipeline`.
+3. Completa inputs solo si la acción lo requiere (`tokenize` o `generate`).
+4. Presiona `Ejecutar acción` y revisa resultado + output.
 
 ## Notas
 

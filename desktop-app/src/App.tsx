@@ -4,16 +4,12 @@ import {
   useMemo,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import {
-  copyFile,
   createDirectory,
-  deleteFile,
   getWorkspaceRoot,
   listEntries,
-  moveFile,
   pickDirectory,
   readTextFile,
   runYalex,
@@ -39,6 +35,56 @@ const YAL_ACTIONS: Array<{ id: YalexAction; label: string }> = [
   { id: "generate", label: "Generate Lexer" },
 ];
 
+const ACTION_HELP: Record<YalexAction, string> = {
+  spec: "Extrae la especificación parseada en JSON.",
+  ast: "Construye y muestra el árbol sintáctico de regex.",
+  nfa: "Genera el AFN por reglas tokenizadas.",
+  combinedNfa: "Muestra el AFN combinado con prioridades.",
+  dfa: "Construye y minimiza el AFD final.",
+  tokenize: "Tokeniza una entrada por archivo o texto directo.",
+  generate: "Genera un lexer Python autónomo.",
+};
+
+const PANEL_STORAGE_KEY = "yalex-studio.panel-sizes.v1";
+
+type PanelSizes = {
+  sidebarWidth: number;
+  rightPanelWidth: number;
+  resultPanelHeight: number;
+  outputPanelHeight: number;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseSavedSizes(raw: string | null): PanelSizes | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PanelSizes>;
+    if (
+      typeof parsed.sidebarWidth !== "number" ||
+      typeof parsed.rightPanelWidth !== "number" ||
+      typeof parsed.resultPanelHeight !== "number" ||
+      typeof parsed.outputPanelHeight !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      sidebarWidth: clamp(parsed.sidebarWidth, 220, 520),
+      rightPanelWidth: clamp(parsed.rightPanelWidth, 260, 560),
+      resultPanelHeight: clamp(parsed.resultPanelHeight, 160, 500),
+      outputPanelHeight: clamp(parsed.outputPanelHeight, 120, 440),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function nowTime(): string {
   return new Date().toLocaleTimeString();
 }
@@ -60,8 +106,19 @@ function isTextFile(name: string): boolean {
   );
 }
 
-function joinPath(base: string, next: string): string {
-  return `${base}${base.endsWith("\\") ? "" : "\\"}${next}`;
+function inferSeparator(path: string): "\\" | "/" {
+  return path.includes("\\") ? "\\" : "/";
+}
+
+function trimTrailingSeparators(path: string): string {
+  return path.replace(/[\\/]+$/, "");
+}
+
+function joinPath(base: string, ...segments: string[]): string {
+  const sep = inferSeparator(base || "");
+  const cleanedBase = trimTrailingSeparators(base);
+  const cleanedSegments = segments.map((segment) => segment.replace(/^[\\/]+|[\\/]+$/g, ""));
+  return [cleanedBase, ...cleanedSegments].filter(Boolean).join(sep);
 }
 
 function getPathBaseName(path: string): string {
@@ -77,12 +134,13 @@ function getParentPath(path: string): string {
   if (!path) {
     return "";
   }
-  const normalized = path.replace(/[\\/]+$/, "");
+  const normalized = trimTrailingSeparators(path);
   const parts = normalized.split(/[\\/]/);
   if (parts.length <= 1) {
     return normalized;
   }
-  return parts.slice(0, -1).join("\\");
+  const sep = inferSeparator(normalized);
+  return parts.slice(0, -1).join(sep);
 }
 
 function languageFromFileName(name: string): string {
@@ -132,6 +190,14 @@ function registerEditorTheme(monaco: Monaco) {
 }
 
 export function App() {
+  const restoredSizes = useMemo(
+    () =>
+      parseSavedSizes(
+        typeof window === "undefined" ? null : window.localStorage.getItem(PANEL_STORAGE_KEY)
+      ),
+    []
+  );
+
   const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
   const [treeMap, setTreeMap] = useState<Record<string, FileNode[]>>({});
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
@@ -148,21 +214,32 @@ export function App() {
   const [generateOutputPath, setGenerateOutputPath] = useState<string>("");
   const [tokenizeMode, setTokenizeMode] = useState<"path" | "text">("path");
   const [tokenizeText, setTokenizeText] = useState<string>("a a a\n");
-  const [sidebarWidth, setSidebarWidth] = useState<number>(290);
-  const [isResizingPanels, setIsResizingPanels] = useState<boolean>(false);
+  const [selectedAction, setSelectedAction] = useState<YalexAction>("spec");
+  const [isRunningAction, setIsRunningAction] = useState<boolean>(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(restoredSizes?.sidebarWidth ?? 290);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(
+    restoredSizes?.rightPanelWidth ?? 340
+  );
+  const [resultPanelHeight, setResultPanelHeight] = useState<number>(
+    restoredSizes?.resultPanelHeight ?? 270
+  );
+  const [outputPanelHeight, setOutputPanelHeight] = useState<number>(
+    restoredSizes?.outputPanelHeight ?? 180
+  );
+  const [resizeState, setResizeState] = useState<{
+    target: "sidebar" | "rightPanel" | "resultPanel" | "outputPanel";
+    startX: number;
+    startY: number;
+    startSidebarWidth: number;
+    startRightPanelWidth: number;
+    startResultPanelHeight: number;
+    startOutputPanelHeight: number;
+  } | null>(null);
   const [pendingCreate, setPendingCreate] = useState<{
     type: "file" | "folder";
     parentDir: string;
     draftName: string;
   } | null>(null);
-  const [clipboardPath, setClipboardPath] = useState<string | null>(null);
-  const [clipboardMode, setClipboardMode] = useState<"copy" | "cut" | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string } | null>(null);
-  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
-  const [draggedPath, setDraggedPath] = useState<string | null>(null);
-  const [dragInProgress, setDragInProgress] = useState<boolean>(false);
-  const [dragStartPoint, setDragStartPoint] = useState<{ x: number; y: number } | null>(null);
-  const [suppressNextClick, setSuppressNextClick] = useState<boolean>(false);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.path === activeTabPath) ?? null,
@@ -295,111 +372,13 @@ export function App() {
     }
   }
 
-  async function refreshExplorerRoot() {
+  async function refreshExplorerRoot(showMessage = true) {
     if (!workspaceRoot) {
       return;
     }
     await loadDir(workspaceRoot);
-    pushOutput("info", "Explorer recargado.");
-  }
-
-  function copyToClipboard(path: string) {
-    setClipboardPath(path);
-    setClipboardMode("copy");
-    setContextMenu(null);
-    pushOutput("info", `Copiado: ${getPathBaseName(path)}`);
-  }
-
-  function cutToClipboard(path: string) {
-    setClipboardPath(path);
-    setClipboardMode("cut");
-    setContextMenu(null);
-    pushOutput("info", `Cortado: ${getPathBaseName(path)}`);
-  }
-
-  async function pasteFromClipboard(targetDir: string) {
-    if (!clipboardPath || !clipboardMode) {
-      pushOutput("error", "No hay nada en el portapapeles.");
-      return;
-    }
-
-    try {
-      const fileName = getPathBaseName(clipboardPath);
-      const destPath = joinPath(targetDir, fileName);
-
-      if (clipboardMode === "copy") {
-        await copyFile(clipboardPath, destPath);
-        pushOutput("ok", `Copiado: ${fileName}`);
-      } else if (clipboardMode === "cut") {
-        await moveFile(clipboardPath, destPath);
-        pushOutput("ok", `Movido: ${fileName}`);
-        setClipboardPath(null);
-        setClipboardMode(null);
-      }
-
-      await loadDir(targetDir);
-      const parentDir = getParentPath(clipboardPath);
-      if (parentDir && parentDir !== targetDir) {
-        await loadDir(parentDir);
-      }
-    } catch (error) {
-      pushOutput("error", `Error al pegar: ${String(error)}`);
-    }
-  }
-
-  async function movePathToDirectory(sourcePath: string, targetDir: string) {
-    const normalizedSource = sourcePath.replace(/[\\/]+$/, "");
-    const normalizedTarget = targetDir.replace(/[\\/]+$/, "");
-    const fileName = getPathBaseName(sourcePath);
-
-    if (!normalizedSource || !normalizedTarget) {
-      return;
-    }
-
-    const lowerSource = normalizedSource.toLowerCase();
-    const lowerTarget = normalizedTarget.toLowerCase();
-    if (lowerTarget === lowerSource || lowerTarget.startsWith(`${lowerSource}\\`)) {
-      pushOutput("error", "No se puede mover una carpeta dentro de si misma.");
-      return;
-    }
-
-    const parentDir = getParentPath(sourcePath);
-    if (parentDir && parentDir.toLowerCase() === lowerTarget) {
-      pushOutput("info", "El elemento ya se encuentra en ese directorio.");
-      return;
-    }
-
-    try {
-      const destPath = joinPath(targetDir, fileName);
-      await moveFile(sourcePath, destPath);
-      pushOutput("ok", `Movido: ${fileName}`);
-
-      await loadDir(targetDir);
-      if (parentDir && parentDir !== targetDir) {
-        await loadDir(parentDir);
-      }
-    } catch (error) {
-      pushOutput("error", `Error al mover ${fileName}: ${String(error)}`);
-    }
-  }
-
-  async function deleteFileOrFolder(path: string) {
-    if (!confirm(`¿Eliminar ${getPathBaseName(path)}?`)) {
-      return;
-    }
-
-    try {
-      await deleteFile(path);
-      pushOutput("ok", `Eliminado: ${getPathBaseName(path)}`);
-      const parentDir = getParentPath(path);
-      if (parentDir) {
-        await loadDir(parentDir);
-      }
-      if (selectedPath === path) {
-        setSelectedPath(parentDir || workspaceRoot);
-      }
-    } catch (error) {
-      pushOutput("error", `Error al eliminar: ${String(error)}`);
+    if (showMessage) {
+      pushOutput("info", "Explorer recargado.");
     }
   }
 
@@ -488,6 +467,7 @@ export function App() {
     const yalPath = yalSource ? undefined : yalFilePath;
 
     try {
+      setIsRunningAction(true);
       pushOutput("info", `Ejecutando acción: ${action}`);
       const response = await runYalex({
         action,
@@ -507,9 +487,11 @@ export function App() {
       }
       const formatted = JSON.stringify(parsed.result, null, 2);
       setLatestResult(formatted);
-      pushOutput("ok", formatted);
+      pushOutput("ok", `${action} finalizado correctamente.`);
     } catch (error) {
       pushOutput("error", `Fallo al ejecutar ${action}: ${String(error)}`);
+    } finally {
+      setIsRunningAction(false);
     }
   }
 
@@ -556,51 +538,15 @@ export function App() {
     children.forEach((entry) => {
       const isOpen = Boolean(expandedDirs[entry.path]);
       const isSelected = selectedPath === entry.path;
-      const isDraggedOver = dragOverPath === entry.path;
-      const isDragSource = dragInProgress && draggedPath === entry.path;
       if (entry.isDir) {
         rows.push(
-          <div
-            key={entry.path}
-            onMouseEnter={() => {
-              if (dragInProgress && draggedPath && draggedPath !== entry.path) {
-                setDragOverPath(entry.path);
-              }
-            }}
-            onMouseLeave={() => {
-              if (dragOverPath === entry.path) {
-                setDragOverPath(null);
-              }
-            }}
-          >
+          <div key={entry.path}>
             <button
-              className={`entry ${isSelected ? "selected" : ""} ${isDraggedOver ? "drag-over" : ""} ${isDragSource ? "drag-source" : ""}`}
+              className={`entry ${isSelected ? "selected" : ""}`}
               style={{ paddingLeft: `${10 + depth * 14}px` }}
-              onMouseEnter={() => {
-                if (dragInProgress && draggedPath && draggedPath !== entry.path) {
-                  setDragOverPath(entry.path);
-                }
-              }}
-              onClick={() => {
-                if (suppressNextClick) {
-                  setSuppressNextClick(false);
-                  return;
-                }
-                void toggleDir(entry.path);
-              }}
-              onMouseDown={(e) => {
-                if (e.button === 0) {
-                  setDraggedPath(entry.path);
-                  setDragStartPoint({ x: e.clientX, y: e.clientY });
-                  setDragOverPath(null);
-                }
-              }}
-              onContextMenu={(e: ReactMouseEvent<HTMLButtonElement>) => {
-                e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, path: entry.path });
-              }}
+              onClick={() => void toggleDir(entry.path)}
             >
-              <span className="entry-kind">{isOpen ? "v" : ">"}</span>
+              <span className="entry-kind">{isOpen ? "▾" : "▸"}</span>
               <span>{entry.name}</span>
             </button>
             {isOpen && <div>{renderTree(entry.path, depth + 1)}</div>}
@@ -612,31 +558,16 @@ export function App() {
       rows.push(
         <button
           key={entry.path}
-          className={`entry ${isSelected ? "selected" : ""} ${isDragSource ? "drag-source" : ""}`}
+          className={`entry ${isSelected ? "selected" : ""}`}
           style={{ paddingLeft: `${10 + depth * 14}px` }}
           onClick={() => {
-            if (suppressNextClick) {
-              setSuppressNextClick(false);
-              return;
-            }
             setSelectedPath(entry.path);
             if (isTextFile(entry.name)) {
               void openFile(entry.path);
             }
           }}
-          onMouseDown={(e) => {
-            if (e.button === 0) {
-              setDraggedPath(entry.path);
-              setDragStartPoint({ x: e.clientX, y: e.clientY });
-              setDragOverPath(null);
-            }
-          }}
-          onContextMenu={(e: ReactMouseEvent<HTMLButtonElement>) => {
-            e.preventDefault();
-            setContextMenu({ x: e.clientX, y: e.clientY, path: entry.path });
-          }}
         >
-          <span className="entry-kind">FILE</span>
+          <span className="entry-kind">•</span>
           <span>{entry.name}</span>
         </button>
       );
@@ -649,9 +580,9 @@ export function App() {
     async function bootstrap() {
       try {
         const root = await getWorkspaceRoot();
-        setYalFilePath(joinPath(root, "examples\\simple.yal"));
-        setInputFilePath(joinPath(root, "tests\\input\\low.txt"));
-        setGenerateOutputPath(joinPath(root, "output\\lexer_generated_tauri.py"));
+        setYalFilePath(joinPath(root, "examples", "simple.yal"));
+        setInputFilePath(joinPath(root, "tests", "input", "low.txt"));
+        setGenerateOutputPath(joinPath(root, "output", "lexer_generated_tauri.py"));
         await openWorkspaceRoot(root);
       } catch (error) {
         pushOutput("error", `No se pudo inicializar la app: ${String(error)}`);
@@ -662,24 +593,53 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isResizingPanels) {
+    if (!resizeState) {
       return;
     }
 
+    const activeResize = resizeState;
+
     function onMouseMove(event: globalThis.MouseEvent) {
-      const nextWidth = Math.min(520, Math.max(220, event.clientX));
-      setSidebarWidth(nextWidth);
+      const dx = event.clientX - activeResize.startX;
+      const dy = event.clientY - activeResize.startY;
+
+      if (activeResize.target === "sidebar") {
+        const nextWidth = Math.min(520, Math.max(220, activeResize.startSidebarWidth + dx));
+        setSidebarWidth(nextWidth);
+        return;
+      }
+
+      if (activeResize.target === "rightPanel") {
+        const nextWidth = Math.min(560, Math.max(260, activeResize.startRightPanelWidth - dx));
+        setRightPanelWidth(nextWidth);
+        return;
+      }
+
+      if (activeResize.target === "resultPanel") {
+        const nextHeight = Math.min(500, Math.max(160, activeResize.startResultPanelHeight - dy));
+        setResultPanelHeight(nextHeight);
+        return;
+      }
+
+      if (activeResize.target === "outputPanel") {
+        const nextHeight = Math.min(440, Math.max(120, activeResize.startOutputPanelHeight - dy));
+        setOutputPanelHeight(nextHeight);
+      }
     }
 
     function onMouseUp() {
-      setIsResizingPanels(false);
+      setResizeState(null);
     }
 
     const previousCursor = document.body.style.cursor;
     const previousUserSelect = document.body.style.userSelect;
 
-    document.body.style.cursor = "col-resize";
+    document.body.style.cursor =
+      activeResize.target === "sidebar" || activeResize.target === "rightPanel"
+        ? "col-resize"
+        : "row-resize";
     document.body.style.userSelect = "none";
+
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
 
@@ -689,42 +649,25 @@ export function App() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [isResizingPanels]);
+  }, [resizeState]);
 
   useEffect(() => {
-    function onGlobalMouseMove(event: globalThis.MouseEvent) {
-      if (!dragStartPoint || !draggedPath || dragInProgress) {
-        return;
-      }
-      const dx = event.clientX - dragStartPoint.x;
-      const dy = event.clientY - dragStartPoint.y;
-      if (Math.hypot(dx, dy) >= 4) {
-        setDragInProgress(true);
-      }
+    if (typeof window === "undefined") {
+      return;
     }
 
-    function onGlobalMouseUp() {
-      if (dragInProgress && draggedPath && dragOverPath && draggedPath !== dragOverPath) {
-        void movePathToDirectory(draggedPath, dragOverPath);
-        setSuppressNextClick(true);
-      }
-
-      setDragInProgress(false);
-      setDraggedPath(null);
-      setDragOverPath(null);
-      setDragStartPoint(null);
-    }
-
-    window.addEventListener("mousemove", onGlobalMouseMove);
-    window.addEventListener("mouseup", onGlobalMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onGlobalMouseMove);
-      window.removeEventListener("mouseup", onGlobalMouseUp);
+    const payload: PanelSizes = {
+      sidebarWidth,
+      rightPanelWidth,
+      resultPanelHeight,
+      outputPanelHeight,
     };
-  }, [dragInProgress, draggedPath, dragOverPath, dragStartPoint]);
+
+    window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(payload));
+  }, [sidebarWidth, rightPanelWidth, resultPanelHeight, outputPanelHeight]);
 
   return (
-    <div className="shell">
+    <div className="shell" style={{ gridTemplateRows: `44px 1fr 6px ${outputPanelHeight}px` }}>
       <header className="topbar">
         <h1>YALex Studio</h1>
         <div className="topbar-actions">
@@ -738,7 +681,9 @@ export function App() {
             />
             Guardar
           </button>
-          <button onClick={() => void refreshExplorerRoot()}>Refrescar Explorer</button>
+          <button onClick={() => void runAction(selectedAction)} disabled={isRunningAction}>
+            {isRunningAction ? "Ejecutando..." : `Ejecutar ${selectedAction}`}
+          </button>
         </div>
       </header>
 
@@ -750,6 +695,20 @@ export function App() {
           <div className="panel-title">
             <span>Explorer</span>
             <div className="panel-title-actions">
+              <button
+                title="Abrir carpeta"
+                aria-label="Abrir carpeta"
+                onClick={() => void openWorkspaceRootFromDialog()}
+              >
+                ≡
+              </button>
+              <button
+                title="Refrescar"
+                aria-label="Refrescar"
+                onClick={() => void refreshExplorerRoot()}
+              >
+                ↻
+              </button>
               <button
                 title="Nuevo archivo"
                 aria-label="Nuevo archivo"
@@ -780,9 +739,7 @@ export function App() {
           </div>
           <div className="path-row" title={workspaceRoot}>
             <span className="path-row-name">{getPathBaseName(workspaceRoot)}</span>
-            <button className="path-row-action" onClick={() => void openWorkspaceRootFromDialog()}>
-              Abrir carpeta...
-            </button>
+            <span className="path-row-hint">{workspaceRoot || "Sin carpeta"}</span>
           </div>
           <div className="file-list">
             {workspaceRoot && renderTree(workspaceRoot, 0)}
@@ -794,33 +751,50 @@ export function App() {
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize explorer"
-          onMouseDown={() => setIsResizingPanels(true)}
+          onMouseDown={(event) =>
+            setResizeState({
+              target: "sidebar",
+              startX: event.clientX,
+              startY: event.clientY,
+              startSidebarWidth: sidebarWidth,
+              startRightPanelWidth: rightPanelWidth,
+              startResultPanelHeight: resultPanelHeight,
+              startOutputPanelHeight: outputPanelHeight,
+            })
+          }
         />
 
         <section className="editor-area">
           <div className="tabs">
-            {tabs.map((tab) => (
-              <button
-                key={tab.path}
-                className={`tab ${tab.path === activeTabPath ? "active" : ""}`}
-                onClick={() => setActiveTabPath(tab.path)}
-              >
-                {tab.name}
-                {tab.dirty ? " *" : ""}
-                <span
-                  className="tab-close"
-                  onClick={(event: ReactMouseEvent<HTMLSpanElement>) => {
-                    event.stopPropagation();
-                    closeTab(tab.path);
-                  }}
+            {tabs.length === 0 ? (
+              <span className="tabs-empty">Sin archivos abiertos</span>
+            ) : (
+              tabs.map((tab) => (
+                <button
+                  key={tab.path}
+                  className={`tab ${tab.path === activeTabPath ? "active" : ""}`}
+                  onClick={() => setActiveTabPath(tab.path)}
                 >
-                  x
-                </span>
-              </button>
-            ))}
+                  {tab.name}
+                  {tab.dirty ? " ●" : ""}
+                  <span
+                    className="tab-close"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeTab(tab.path);
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              ))
+            )}
           </div>
 
-          <div className="workbench-split">
+          <div
+            className="workbench-split"
+            style={{ gridTemplateColumns: `1fr 6px ${rightPanelWidth}px` }}
+          >
             <div className="editor-shell">
               {activeTab ? (
                 <Editor
@@ -843,82 +817,164 @@ export function App() {
                   }}
                 />
               ) : (
-                <div className="editor-empty">Abra un archivo en el explorer para editarlo aquí...</div>
+                <div className="editor-empty">
+                  <strong>Inicio rápido</strong>
+                  <br />
+                  1) Abre un archivo .yal desde el explorer.
+                  <br />
+                  2) Selecciona la acción en el panel lateral derecho.
+                  <br />
+                  3) Ejecuta y revisa el resultado.
+                </div>
               )}
             </div>
-            <pre className="result-view">{latestResult}</pre>
-          </div>
 
-          <div className="actions-row">
-            <label>
-              YAL
-              <input value={yalFilePath} onChange={(event) => setYalFilePath(event.target.value)} />
-            </label>
-            {tokenizeMode === "path" ? (
-              <label>
-                Input (archivo)
+            <div
+              className="splitter splitter-inner-vertical"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize pipeline"
+              onMouseDown={(event) =>
+                setResizeState({
+                  target: "rightPanel",
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  startSidebarWidth: sidebarWidth,
+                  startRightPanelWidth: rightPanelWidth,
+                  startResultPanelHeight: resultPanelHeight,
+                  startOutputPanelHeight: outputPanelHeight,
+                })
+              }
+            />
+
+            <aside className="command-panel">
+              <div className="panel-title panel-title-tight">Pipeline</div>
+              <label className="field">
+                Acción
+                <select
+                  value={selectedAction}
+                  onChange={(event) => setSelectedAction(event.target.value as YalexAction)}
+                >
+                  {YAL_ACTIONS.map((action) => (
+                    <option key={action.id} value={action.id}>
+                      {action.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                Archivo .yal
                 <input
-                  value={inputFilePath}
-                  onChange={(event) => setInputFilePath(event.target.value)}
+                  value={yalFilePath}
+                  onChange={(event) => setYalFilePath(event.target.value)}
+                  placeholder="Ruta al archivo .yal"
                 />
               </label>
-            ) : (
-              <label>
-                Input (texto)
-                <textarea
-                  className="inline-textarea"
-                  value={tokenizeText}
-                  onChange={(event) => setTokenizeText(event.target.value)}
-                />
-              </label>
-            )}
-            <label>
-              Output lexer
-              <input
-                value={generateOutputPath}
-                onChange={(event) => setGenerateOutputPath(event.target.value)}
-              />
-            </label>
-            <label>
-              Modo tokenización
-              <select
-                value={tokenizeMode}
-                onChange={(event) => setTokenizeMode(event.target.value as "path" | "text")}
+
+              {selectedAction === "tokenize" && (
+                <>
+                  <label className="field">
+                    Modo tokenización
+                    <select
+                      value={tokenizeMode}
+                      onChange={(event) =>
+                        setTokenizeMode(event.target.value as "path" | "text")
+                      }
+                    >
+                      <option value="path">Archivo</option>
+                      <option value="text">Texto directo</option>
+                    </select>
+                  </label>
+
+                  {tokenizeMode === "path" ? (
+                    <label className="field">
+                      Input (archivo)
+                      <input
+                        value={inputFilePath}
+                        onChange={(event) => setInputFilePath(event.target.value)}
+                        placeholder="Ruta del texto de entrada"
+                      />
+                    </label>
+                  ) : (
+                    <label className="field">
+                      Input (texto)
+                      <textarea
+                        className="inline-textarea"
+                        value={tokenizeText}
+                        onChange={(event) => setTokenizeText(event.target.value)}
+                        placeholder="Texto a tokenizar"
+                      />
+                    </label>
+                  )}
+                </>
+              )}
+
+              {selectedAction === "generate" && (
+                <label className="field">
+                  Output lexer
+                  <input
+                    value={generateOutputPath}
+                    onChange={(event) => setGenerateOutputPath(event.target.value)}
+                    placeholder="Ruta del lexer generado"
+                  />
+                </label>
+              )}
+
+              <button
+                className="run-action-btn"
+                onClick={() => void runAction(selectedAction)}
+                disabled={isRunningAction}
               >
-                <option value="path">Archivo</option>
-                <option value="text">Texto directo</option>
-              </select>
-            </label>
+                {isRunningAction ? "Ejecutando..." : "Ejecutar acción"}
+              </button>
+
+              <p className="command-hint">{ACTION_HELP[selectedAction]}</p>
+            </aside>
           </div>
 
-          <div className="actions-grid">
-            {YAL_ACTIONS.map((item) => (
-              <button key={item.id} onClick={() => void runAction(item.id)}>
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <div
+            className="splitter splitter-horizontal"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize result"
+            onMouseDown={(event) =>
+              setResizeState({
+                target: "resultPanel",
+                startX: event.clientX,
+                startY: event.clientY,
+                startSidebarWidth: sidebarWidth,
+                startRightPanelWidth: rightPanelWidth,
+                startResultPanelHeight: resultPanelHeight,
+                startOutputPanelHeight: outputPanelHeight,
+              })
+            }
+          />
+
+          <section className="result-panel" style={{ height: `${resultPanelHeight}px` }}>
+            <div className="panel-title panel-title-tight">Resultado JSON</div>
+            <pre className="result-view">{latestResult}</pre>
+          </section>
         </section>
       </main>
 
-      {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ position: "fixed", left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
-          onMouseLeave={() => setContextMenu(null)}
-        >
-          <button onClick={() => copyToClipboard(contextMenu.path)}>Copiar</button>
-          <button onClick={() => cutToClipboard(contextMenu.path)}>Cortar</button>
-          <button
-            onClick={() => void pasteFromClipboard(contextMenu.path)}
-            disabled={!clipboardPath || !clipboardMode}
-          >
-            Pegar
-          </button>
-          <hr />
-          <button onClick={() => void deleteFileOrFolder(contextMenu.path)}>Eliminar</button>
-        </div>
-      )}
+      <div
+        className="splitter splitter-horizontal shell-horizontal-splitter"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize output"
+        onMouseDown={(event) =>
+          setResizeState({
+            target: "outputPanel",
+            startX: event.clientX,
+            startY: event.clientY,
+            startSidebarWidth: sidebarWidth,
+            startRightPanelWidth: rightPanelWidth,
+            startResultPanelHeight: resultPanelHeight,
+            startOutputPanelHeight: outputPanelHeight,
+          })
+        }
+      />
 
       <section className="output-panel">
         <div className="panel-title">Output</div>
