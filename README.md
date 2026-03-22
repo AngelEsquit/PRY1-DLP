@@ -107,22 +107,32 @@ Flujo típico del menú CLI:
 
 ## App Desktop (Tauri + React)
 
-La app en desktop-app ofrece una experiencia tipo VS Code:
+La app en desktop-app ofrece una experiencia tipo VS Code, enfocada en flujo YALex:
 
 - Explorer recursivo.
 - Editor en pestañas con resaltado de sintaxis (Monaco Editor).
-- Panel de resultados JSON.
-- Panel de output.
-- Acciones del pipeline: spec, ast, nfa, combinedNfa, dfa, tokenize y generate.
-- Creación inline de archivo/carpeta y selector nativo para cambiar carpeta raíz.
+- Panel lateral de ejecución con una acción activa por vez (`spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`).
+- Campos contextuales por acción (solo se muestran los necesarios).
+- Panel de resultados JSON y panel de output para trazas y errores.
+- Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia de tamaños al reabrir.
+- Acciones de uso diario: abrir carpeta, refrescar explorer, crear archivo/carpeta, guardar y ejecutar.
+
+Flujo recomendado en la UI:
+
+1. Abrir un `.yal` desde el explorer.
+2. Elegir acción en el panel **Pipeline**.
+3. Completar input/output solo si la acción lo requiere.
+4. Ejecutar y revisar `Resultado JSON` + `Output`.
 
 Comandos:
 
 ```bash
 cd desktop-app
 npm install
-npm run tauri dev
+npm run tauri -- dev
 ```
+
+Nota: también funciona `npm run tauri dev` en la mayoría de entornos.
 
 Build de frontend:
 
@@ -155,6 +165,7 @@ py -3 -m unittest discover -s tests -p "test_*.py" -v
 ## Solución de Problemas Rápida
 
 - Error al correr npm run tauri dev desde la raíz: ejecutar dentro de desktop-app.
+- Si falla el comando en tu shell, usar: `npm run tauri -- dev`.
 - Error de cargo o rustc no encontrado: instalar Rust y reiniciar terminal.
 - Error de linker en Windows: instalar MSVC Build Tools.
 - Puerto ocupado de Vite: cerrar instancia anterior o reiniciar la app.
