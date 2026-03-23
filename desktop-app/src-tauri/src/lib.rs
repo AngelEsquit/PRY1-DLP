@@ -14,15 +14,33 @@ struct FileNode {
 
 fn detect_workspace_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let name = cwd
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_default();
-    if name == "desktop-app" {
-        cwd.parent().map(Path::to_path_buf).unwrap_or(cwd)
-    } else {
-        cwd
+
+    let mut probe = cwd.as_path();
+    loop {
+        let has_bridge = probe.join("src").join("bridge_cli.py").exists();
+        let has_desktop_app = probe.join("desktop-app").exists();
+        if has_bridge && has_desktop_app {
+            return probe.to_path_buf();
+        }
+
+        let is_desktop_app = probe
+            .file_name()
+            .map(|v| v.to_string_lossy() == "desktop-app")
+            .unwrap_or(false);
+        if is_desktop_app {
+            return probe
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| probe.to_path_buf());
+        }
+
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => break,
+        }
     }
+
+    cwd
 }
 
 #[tauri::command]
@@ -162,10 +180,6 @@ fn delete_file(path: String) -> Result<(), String> {
 fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<String, String> {
     let mut child = Command::new(program)
         .args(args)
-        .env(
-            "PATH",
-            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -196,9 +210,38 @@ fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<Str
     }
 }
 
+fn resolve_bridge_script(workspace_root: &str) -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    let provided_root = PathBuf::from(workspace_root);
+    candidates.push(provided_root.clone());
+
+    let mut ancestor = provided_root.parent();
+    while let Some(parent) = ancestor {
+        candidates.push(parent.to_path_buf());
+        ancestor = parent.parent();
+    }
+
+    candidates.push(detect_workspace_root());
+
+    let mut tried: Vec<String> = Vec::new();
+    for base in candidates {
+        let script = base.join("src").join("bridge_cli.py");
+        tried.push(script.to_string_lossy().to_string());
+        if script.exists() {
+            return Ok(script);
+        }
+    }
+
+    Err(format!(
+        "No se encontró bridge_cli.py. Rutas intentadas: {}",
+        tried.join(" | ")
+    ))
+}
+
 #[tauri::command]
 fn run_yalex_bridge(workspace_root: String, payload_json: String) -> Result<String, String> {
-    let script = PathBuf::from(&workspace_root).join("src").join("bridge_cli.py");
+    let script = resolve_bridge_script(&workspace_root)?;
     let script_str = script
         .to_str()
         .ok_or_else(|| "Ruta de bridge inválida".to_string())?;

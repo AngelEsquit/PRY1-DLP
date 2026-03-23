@@ -402,6 +402,26 @@ button {
   cursor: default;
 }
 
+.run-all-btn {
+  margin: 8px 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  height: 32px;
+  font-weight: 600;
+}
+
+.run-all-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: #4d4d4d;
+}
+
+.run-all-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .command-hint {
   margin: 10px;
   font-size: 12px;
@@ -412,9 +432,46 @@ button {
 .result-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: 34px 1fr;
+  grid-template-rows: auto 1fr;
   background: #1f1f1f;
   overflow: hidden;
+}
+
+.result-header {
+  border-bottom: 1px solid var(--border);
+  background: #252526;
+}
+
+.result-header .panel-title {
+  border-bottom: none;
+}
+
+.result-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px 8px;
+  overflow-x: auto;
+}
+
+.result-tab-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 4px;
+  height: 26px;
+  padding: 0 9px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.result-tab-btn:hover {
+  background: var(--surface-3);
+}
+
+.result-tab-btn.active {
+  border-color: var(--accent-soft);
+  background: #1f3347;
+  color: #dff1ff;
 }
 
 .result-view {

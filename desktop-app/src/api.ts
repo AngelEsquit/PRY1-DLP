@@ -3,6 +3,10 @@ import type { FileNode, YalexAction } from "./types";
 
 const TAURI_INVOKE_TIMEOUT_MS = 15000;
 
+type InvokeOptions = {
+  timeoutMs?: number | null;
+};
+
 // Check if window is defined (not in SSR context)
 function isWindowDefined(): boolean {
   return typeof window !== "undefined";
@@ -23,7 +27,11 @@ export function isTauriRuntime(): boolean {
   return Boolean(runtime.__TAURI__) || typeof runtime.__TAURI_INTERNALS__?.invoke === "function";
 }
 
-async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+async function invokeTauri<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  options?: InvokeOptions
+): Promise<T> {
   if (!isWindowDefined()) {
     throw new Error("Not in browser environment - cannot call Tauri commands");
   }
@@ -34,16 +42,25 @@ async function invokeTauri<T>(command: string, args?: Record<string, unknown>): 
     );
   }
 
+  const timeoutMs =
+    options && Object.prototype.hasOwnProperty.call(options, "timeoutMs")
+      ? options.timeoutMs
+      : TAURI_INVOKE_TIMEOUT_MS;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      reject(new Error(`Timeout ejecutando '${command}' (${TAURI_INVOKE_TIMEOUT_MS} ms)`));
-    }, TAURI_INVOKE_TIMEOUT_MS);
-  });
+  const timeoutPromise =
+    timeoutMs != null
+      ? new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(new Error(`Timeout ejecutando '${command}' (${timeoutMs} ms)`));
+          }, timeoutMs);
+        })
+      : undefined;
 
   try {
     console.debug(`[Tauri] Invoking: ${command}`, args);
-    const result = await Promise.race([invoke<T>(command, args), timeoutPromise]);
+    const result = timeoutPromise
+      ? await Promise.race([invoke<T>(command, args), timeoutPromise])
+      : await invoke<T>(command, args);
     console.debug(`[Tauri] Command '${command}' succeeded`);
     return result;
   } catch (error) {
@@ -114,7 +131,7 @@ export async function createDirectory(path: string): Promise<void> {
 }
 
 export async function pickDirectory(): Promise<string | null> {
-  return invokeTauri("pick_directory");
+  return invokeTauri("pick_directory", undefined, { timeoutMs: null });
 }
 
 export async function copyFile(src: string, dest: string): Promise<void> {

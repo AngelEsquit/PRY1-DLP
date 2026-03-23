@@ -41,6 +41,12 @@ const YAL_ACTIONS: Array<{ id: YalexAction; label: string }> = [
   { id: "generate", label: "Generate Lexer" },
 ];
 
+const FULL_PIPELINE_ACTIONS: YalexAction[] = YAL_ACTIONS.map((action) => action.id);
+
+function getActionLabel(action: YalexAction): string {
+  return YAL_ACTIONS.find((item) => item.id === action)?.label ?? action;
+}
+
 const ACTION_HELP: Record<YalexAction, string> = {
   spec: "Extrae la especificación parseada en JSON.",
   ast: "Construye y muestra el árbol sintáctico de regex.",
@@ -214,6 +220,8 @@ export function App() {
 
   const [output, setOutput] = useState<OutputItem[]>([]);
   const [latestResult, setLatestResult] = useState<string>("Sin resultados todavía.");
+  const [actionResults, setActionResults] = useState<Partial<Record<YalexAction, string>>>({});
+  const [activeResultAction, setActiveResultAction] = useState<YalexAction | null>(null);
 
   const [yalFilePath, setYalFilePath] = useState<string>("");
   const [inputFilePath, setInputFilePath] = useState<string>("");
@@ -253,6 +261,16 @@ export function App() {
     () => tabs.find((tab) => tab.path === activeTabPath) ?? null,
     [tabs, activeTabPath]
   );
+
+  const visibleResultActions = useMemo(
+    () => FULL_PIPELINE_ACTIONS.filter((action) => Boolean(actionResults[action])),
+    [actionResults]
+  );
+
+  const activeResultText =
+    activeResultAction && actionResults[activeResultAction]
+      ? actionResults[activeResultAction]
+      : latestResult;
 
   function pushOutput(type: OutputItem["type"], text: string) {
     setOutput((prev) => [...prev, { ts: nowTime(), type, text }]);
@@ -471,7 +489,43 @@ export function App() {
     }
   }
 
+  async function executeAction(
+    action: YalexAction,
+    yalPath: string | undefined,
+    yalSource: string | undefined
+  ): Promise<boolean> {
+    const response = await runYalex({
+      workspaceRoot,
+      action,
+      yalPath,
+      yalSource,
+      inputPath: action === "tokenize" && tokenizeMode === "path" ? inputFilePath : undefined,
+      inputText: action === "tokenize" && tokenizeMode === "text" ? tokenizeText : undefined,
+      outputPath: action === "generate" ? generateOutputPath : undefined,
+      includeTrace: action === "tokenize",
+      traceLimit: 200,
+    });
+
+    const parsed = response as { ok: boolean; result?: unknown; error?: string };
+    if (!parsed.ok) {
+      pushOutput("error", parsed.error || "Error desconocido en backend.");
+      return false;
+    }
+
+    const formatted = JSON.stringify(parsed.result, null, 2);
+    setLatestResult(formatted);
+    setActionResults((prev) => ({ ...prev, [action]: formatted }));
+    setActiveResultAction(action);
+    pushOutput("ok", `${action} finalizado correctamente.`);
+    return true;
+  }
+
   async function runAction(action: YalexAction) {
+    if (!workspaceRoot) {
+      pushOutput("error", "No hay workspace abierto.");
+      return;
+    }
+
     if (!yalFilePath && !activeTab?.name.endsWith(".yal")) {
       pushOutput("error", "Seleccione o abra un archivo .yal antes de ejecutar acciones.");
       return;
@@ -483,28 +537,50 @@ export function App() {
     try {
       setIsRunningAction(true);
       pushOutput("info", `Ejecutando acción: ${action}`);
-      const response = await runYalex({
-        workspaceRoot,
-        action,
-        yalPath,
-        yalSource,
-        inputPath: action === "tokenize" && tokenizeMode === "path" ? inputFilePath : undefined,
-        inputText: action === "tokenize" && tokenizeMode === "text" ? tokenizeText : undefined,
-        outputPath: action === "generate" ? generateOutputPath : undefined,
-        includeTrace: action === "tokenize",
-        traceLimit: 200,
-      });
-
-      const parsed = response as { ok: boolean; result?: unknown; error?: string };
-      if (!parsed.ok) {
-        pushOutput("error", parsed.error || "Error desconocido en backend.");
-        return;
-      }
-      const formatted = JSON.stringify(parsed.result, null, 2);
-      setLatestResult(formatted);
-      pushOutput("ok", `${action} finalizado correctamente.`);
+      await executeAction(action, yalPath, yalSource);
     } catch (error) {
       pushOutput("error", `Fallo al ejecutar ${action}: ${String(error)}`);
+    } finally {
+      setIsRunningAction(false);
+    }
+  }
+
+  async function runFullPipeline() {
+    if (!workspaceRoot) {
+      pushOutput("error", "No hay workspace abierto.");
+      return;
+    }
+
+    if (!yalFilePath && !activeTab?.name.endsWith(".yal")) {
+      pushOutput("error", "Seleccione o abra un archivo .yal antes de ejecutar acciones.");
+      return;
+    }
+
+    const yalSource = activeTab?.name.endsWith(".yal") ? activeTab.content : undefined;
+    const yalPath = yalSource ? undefined : yalFilePath;
+
+    try {
+      setIsRunningAction(true);
+      pushOutput("info", "Iniciando ejecución secuencial de todo el pipeline.");
+
+      for (let index = 0; index < FULL_PIPELINE_ACTIONS.length; index++) {
+        const nextAction = FULL_PIPELINE_ACTIONS[index];
+        setSelectedAction(nextAction);
+        pushOutput(
+          "info",
+          `Paso ${index + 1}/${FULL_PIPELINE_ACTIONS.length}: ejecutando ${nextAction}`
+        );
+
+        const ok = await executeAction(nextAction, yalPath, yalSource);
+        if (!ok) {
+          pushOutput("error", `Pipeline detenido en '${nextAction}'.`);
+          return;
+        }
+      }
+
+      pushOutput("ok", "Pipeline completo finalizado correctamente.");
+    } catch (error) {
+      pushOutput("error", `Fallo al ejecutar pipeline completo: ${String(error)}`);
     } finally {
       setIsRunningAction(false);
     }
@@ -1035,6 +1111,14 @@ export function App() {
                 {isRunningAction ? "Ejecutando..." : "Ejecutar acción"}
               </button>
 
+              <button
+                className="run-all-btn"
+                onClick={() => void runFullPipeline()}
+                disabled={isRunningAction}
+              >
+                {isRunningAction ? "Pipeline en ejecución..." : "Ejecutar todo (secuencial)"}
+              </button>
+
               <p className="command-hint">{ACTION_HELP[selectedAction]}</p>
             </aside>
           </div>
@@ -1058,8 +1142,29 @@ export function App() {
           />
 
           <section className="result-panel" style={{ height: `${resultPanelHeight}px` }}>
-            <div className="panel-title panel-title-tight">Resultado JSON</div>
-            <pre className="result-view">{latestResult}</pre>
+            <div className="result-header">
+              <div className="panel-title panel-title-tight">Resultado JSON</div>
+              {visibleResultActions.length > 0 && (
+                <div className="result-tabs" role="tablist" aria-label="Etapas del pipeline">
+                  {visibleResultActions.map((action) => {
+                    const isActive = action === activeResultAction;
+                    return (
+                      <button
+                        key={action}
+                        role="tab"
+                        type="button"
+                        className={`result-tab-btn ${isActive ? "active" : ""}`}
+                        aria-selected={isActive}
+                        onClick={() => setActiveResultAction(action)}
+                      >
+                        {getActionLabel(action)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <pre className="result-view">{activeResultText}</pre>
           </section>
         </section>
       </main>
