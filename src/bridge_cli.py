@@ -88,6 +88,23 @@ def _normalize_path(raw: str) -> Path:
     return Path(s)
 
 
+def _read_text_from_payload_path(raw: str, *, label: str) -> str:
+    path = _normalize_path(raw)
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+
+    # Fallback: Windows also accepts forward slashes.
+    alt = Path(str(path).replace("\\", "/"))
+    if alt.exists():
+        return alt.read_text(encoding="utf-8")
+
+    raise FileNotFoundError(
+        f"{label} no encontrado. "
+        f"normalized={path!r}, exists={path.exists()}, "
+        f"alt={alt!r}, alt_exists={alt.exists()}, cwd={Path.cwd()}"
+    )
+
+
 def _run_action(payload: dict) -> dict:
     action = payload.get("action")
     yal_path_raw = payload.get("yalPath")
@@ -99,7 +116,7 @@ def _run_action(payload: dict) -> dict:
     if yal_source_raw is not None:
         source = str(yal_source_raw)
     elif yal_path_raw:
-        source = _normalize_path(yal_path_raw).read_text(encoding="utf-8")
+        source = _read_text_from_payload_path(yal_path_raw, label="yalPath")
     else:
         raise ValueError("Debe enviar 'yalPath' o 'yalSource'")
 
@@ -167,7 +184,7 @@ def _run_action(payload: dict) -> dict:
         if input_text_raw is not None:
             text = str(input_text_raw)
         elif input_path_raw:
-            text = _normalize_path(input_path_raw).read_text(encoding="utf-8")
+            text = _read_text_from_payload_path(input_path_raw, label="inputPath")
         else:
             raise ValueError("Para tokenizar debe enviar 'inputPath' o 'inputText'")
 
@@ -206,7 +223,7 @@ def _run_action(payload: dict) -> dict:
 
 def main() -> int:
     try:
-        raw = sys.stdin.read()
+        raw = sys.stdin.buffer.read().decode("utf-8")
         if not raw.strip():
             raise ValueError("Request vacío en stdin")
         payload = json.loads(raw)
