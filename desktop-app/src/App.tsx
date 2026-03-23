@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import Editor, { loader, type Monaco } from "@monaco-editor/react";
@@ -65,6 +66,201 @@ type PanelSizes = {
   resultPanelHeight: number;
   outputPanelHeight: number;
 };
+
+type GraphNode = {
+  id: string;
+  label: string;
+  isStart?: boolean;
+  isAccept?: boolean;
+};
+
+type GraphEdge = {
+  from: string;
+  to: string;
+  label: string;
+};
+
+type GraphPanel = {
+  title: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function formatCharLabel(raw: string): string {
+  if (raw === "\n") return "\\n";
+  if (raw === "\t") return "\\t";
+  if (raw === " ") return "space";
+  return raw;
+}
+
+function transitionLabel(transition: Record<string, unknown>): string {
+  const char = asString(transition.char);
+  if (char !== null) {
+    return formatCharLabel(char);
+  }
+
+  const kind = asString(transition.kind) ?? "?";
+  const payload = asObject(transition.payload);
+  if (kind === "epsilon") return "ε";
+  if (kind === "char") return payload?.value ? formatCharLabel(String(payload.value)) : "char";
+  if (kind === "wildcard") return "wildcard";
+  if (kind === "charset") return "charset";
+  if (kind === "charset_difference") return "set-diff";
+  return kind;
+}
+
+function buildSingleAutomatonPanel(
+  source: Record<string, unknown>,
+  title: string,
+  includeDfaAcceptMetadata = false
+): GraphPanel | null {
+  const stateSet = new Set<string>();
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  const startState = asNumber(source.start_state);
+  const acceptSingle = asNumber(source.accept_state);
+  const acceptStatesMulti = new Set<number>();
+
+  for (const acceptItem of asArray(source.accept_states)) {
+    const acceptObj = asObject(acceptItem);
+    if (!acceptObj) continue;
+    const state = asNumber(acceptObj.state);
+    if (state !== null) {
+      acceptStatesMulti.add(state);
+    }
+  }
+
+  for (const stateItem of asArray(source.states)) {
+    const stateObj = asObject(stateItem);
+    if (stateObj && includeDfaAcceptMetadata) {
+      const sid = asNumber(stateObj.id);
+      if (sid === null) continue;
+      const isAccept = Boolean(stateObj.is_accept);
+      const labelRaw = asString(stateObj.accept_label);
+      const label = labelRaw ? `q${sid} (${labelRaw})` : `q${sid}`;
+      stateSet.add(String(sid));
+      nodes.push({
+        id: String(sid),
+        label,
+        isStart: startState === sid,
+        isAccept,
+      });
+      continue;
+    }
+
+    const sid = asNumber(stateItem);
+    if (sid === null) continue;
+    stateSet.add(String(sid));
+    nodes.push({
+      id: String(sid),
+      label: `q${sid}`,
+      isStart: startState === sid,
+      isAccept: acceptSingle === sid || acceptStatesMulti.has(sid),
+    });
+  }
+
+  for (const transitionItem of asArray(source.transitions)) {
+    const transitionObj = asObject(transitionItem);
+    if (!transitionObj) continue;
+
+    const from = asNumber(transitionObj.from);
+    const to = asNumber(transitionObj.to);
+    if (from === null || to === null) continue;
+
+    stateSet.add(String(from));
+    stateSet.add(String(to));
+    edges.push({
+      from: String(from),
+      to: String(to),
+      label: transitionLabel(transitionObj),
+    });
+  }
+
+  for (const sid of stateSet) {
+    if (nodes.some((node) => node.id === sid)) {
+      continue;
+    }
+    const numeric = Number(sid);
+    nodes.push({
+      id: sid,
+      label: `q${sid}`,
+      isStart: startState === numeric,
+      isAccept: acceptSingle === numeric || acceptStatesMulti.has(numeric),
+    });
+  }
+
+  nodes.sort((a, b) => Number(a.id) - Number(b.id));
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  return { title, nodes, edges };
+}
+
+function buildAutomatonPanels(action: YalexAction, payload: unknown): GraphPanel[] {
+  const root = asObject(payload);
+  if (!root) return [];
+
+  if (action === "combinedNfa") {
+    const combined = asObject(root.combined_nfa);
+    const panel = combined ? buildSingleAutomatonPanel(combined, "Combined NFA") : null;
+    return panel ? [panel] : [];
+  }
+
+  if (action === "dfa") {
+    const dfa = asObject(root.dfa);
+    const panel = dfa ? buildSingleAutomatonPanel(dfa, "DFA", true) : null;
+    return panel ? [panel] : [];
+  }
+
+  if (action !== "nfa") {
+    return [];
+  }
+
+  const thompson = asObject(root.thompson_nfa);
+  if (!thompson) return [];
+
+  const panels: GraphPanel[] = [];
+  for (const letItem of asArray(thompson.lets)) {
+    const letObj = asObject(letItem);
+    if (!letObj) continue;
+    const letName = asString(letObj.name) ?? "let";
+    const nfa = asObject(letObj.nfa);
+    const panel = nfa ? buildSingleAutomatonPanel(nfa, `NFA let: ${letName}`) : null;
+    if (panel) panels.push(panel);
+  }
+
+  for (const altItem of asArray(thompson.rule_alternatives)) {
+    const altObj = asObject(altItem);
+    if (!altObj) continue;
+    const index = asNumber(altObj.index);
+    const nfa = asObject(altObj.nfa);
+    const panel = nfa ? buildSingleAutomatonPanel(nfa, `NFA alt ${index ?? "?"}`) : null;
+    if (panel) panels.push(panel);
+  }
+
+  return panels;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -221,7 +417,11 @@ export function App() {
   const [output, setOutput] = useState<OutputItem[]>([]);
   const [latestResult, setLatestResult] = useState<string>("Sin resultados todavía.");
   const [actionResults, setActionResults] = useState<Partial<Record<YalexAction, string>>>({});
+  const [actionResultObjects, setActionResultObjects] = useState<
+    Partial<Record<YalexAction, unknown>>
+  >({});
   const [activeResultAction, setActiveResultAction] = useState<YalexAction | null>(null);
+  const [resultViewMode, setResultViewMode] = useState<"json" | "graph">("graph");
 
   const [yalFilePath, setYalFilePath] = useState<string>("");
   const [inputFilePath, setInputFilePath] = useState<string>("");
@@ -271,6 +471,176 @@ export function App() {
     activeResultAction && actionResults[activeResultAction]
       ? actionResults[activeResultAction]
       : latestResult;
+
+  const activeResultObject = activeResultAction ? actionResultObjects[activeResultAction] : null;
+
+  const graphSupportedActions: YalexAction[] = ["ast", "nfa", "combinedNfa", "dfa"];
+  const canRenderGraph = Boolean(
+    activeResultAction && graphSupportedActions.includes(activeResultAction) && activeResultObject
+  );
+
+  function renderRegexNodeTree(node: unknown, keyPrefix: string): JSX.Element {
+    const obj = asObject(node);
+    if (!obj) {
+      return <li key={keyPrefix}>Nodo inválido</li>;
+    }
+
+    const nodeType = asString(obj.type) ?? "node";
+    const labelValue =
+      asString(obj.value) ?? asString(obj.name) ?? asString(obj.operator) ?? nodeType;
+
+    const children: ReactNode[] = [];
+    if (obj.operand) {
+      children.push(renderRegexNodeTree(obj.operand, `${keyPrefix}-operand`));
+    }
+    if (obj.left) {
+      children.push(renderRegexNodeTree(obj.left, `${keyPrefix}-left`));
+    }
+    if (obj.right) {
+      children.push(renderRegexNodeTree(obj.right, `${keyPrefix}-right`));
+    }
+    for (const [index, part] of asArray(obj.parts).entries()) {
+      children.push(renderRegexNodeTree(part, `${keyPrefix}-part-${index}`));
+    }
+
+    return (
+      <li key={keyPrefix}>
+        <span className="ast-node-label">{`${nodeType}: ${labelValue}`}</span>
+        {children.length > 0 && <ul className="ast-node-children">{children}</ul>}
+      </li>
+    );
+  }
+
+  function renderAstGraph(payload: unknown): JSX.Element {
+    const root = asObject(payload);
+    const regexAst = root ? asObject(root.regex_ast) : null;
+    if (!regexAst) {
+      return <div className="graph-empty">No hay estructura AST para renderizar.</div>;
+    }
+
+    const sections: JSX.Element[] = [];
+    for (const letItem of asArray(regexAst.lets)) {
+      const letObj = asObject(letItem);
+      if (!letObj) continue;
+      const name = asString(letObj.name) ?? "let";
+      sections.push(
+        <section key={`let-${name}`} className="graph-panel">
+          <h4>{`AST let: ${name}`}</h4>
+          <ul className="ast-tree">{renderRegexNodeTree(letObj.ast, `let-${name}`)}</ul>
+        </section>
+      );
+    }
+
+    for (const altItem of asArray(regexAst.rule_alternatives)) {
+      const altObj = asObject(altItem);
+      if (!altObj) continue;
+      const index = asNumber(altObj.index);
+      sections.push(
+        <section key={`alt-${index ?? "?"}`} className="graph-panel">
+          <h4>{`AST alternativa ${index ?? "?"}`}</h4>
+          <ul className="ast-tree">{renderRegexNodeTree(altObj.ast, `alt-${index ?? "?"}`)}</ul>
+        </section>
+      );
+    }
+
+    return <div className="graph-panels">{sections.length > 0 ? sections : <div className="graph-empty">Sin nodos AST.</div>}</div>;
+  }
+
+  function renderAutomatonSvg(panel: GraphPanel): JSX.Element {
+    const width = 820;
+    const height = 340;
+    const cx = width / 2;
+    const cy = height / 2;
+    const radius = Math.max(90, Math.min(130, 28 * panel.nodes.length));
+    const nodeRadius = 20;
+    const markerId = `arrow-${panel.title.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+
+    const positions = new Map<string, { x: number; y: number }>();
+    panel.nodes.forEach((node, index) => {
+      const angle = (2 * Math.PI * index) / panel.nodes.length - Math.PI / 2;
+      positions.set(node.id, {
+        x: cx + radius * Math.cos(angle),
+        y: cy + radius * Math.sin(angle),
+      });
+    });
+
+    return (
+      <section key={panel.title} className="graph-panel">
+        <h4>{panel.title}</h4>
+        <div className="graph-canvas-wrap">
+          <svg viewBox={`0 0 ${width} ${height}`} className="automaton-svg" aria-label={panel.title}>
+            <defs>
+              <marker id={markerId} markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" />
+              </marker>
+            </defs>
+
+            {panel.edges.map((edge, index) => {
+              const from = positions.get(edge.from);
+              const to = positions.get(edge.to);
+              if (!from || !to) return null;
+              const mx = (from.x + to.x) / 2;
+              const my = (from.y + to.y) / 2;
+              return (
+                <g key={`${edge.from}-${edge.to}-${index}`}>
+                  <line
+                    x1={from.x}
+                    y1={from.y}
+                    x2={to.x}
+                    y2={to.y}
+                    className="graph-edge"
+                    markerEnd={`url(#${markerId})`}
+                  />
+                  <text x={mx} y={my - 4} className="graph-edge-label">
+                    {edge.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            {panel.nodes.map((node) => {
+              const pos = positions.get(node.id);
+              if (!pos) return null;
+              return (
+                <g key={node.id}>
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={nodeRadius}
+                    className={`graph-node ${node.isAccept ? "accept" : ""} ${node.isStart ? "start" : ""}`}
+                  />
+                  {node.isAccept && <circle cx={pos.x} cy={pos.y} r={nodeRadius - 5} className="graph-node-accept" />}
+                  <text x={pos.x} y={pos.y + 4} className="graph-node-label" textAnchor="middle">
+                    {node.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </section>
+    );
+  }
+
+  function renderGraphView(): JSX.Element {
+    if (!activeResultAction || !activeResultObject) {
+      return <div className="graph-empty">Ejecuta una etapa para ver una visualización.</div>;
+    }
+
+    if (activeResultAction === "ast") {
+      return renderAstGraph(activeResultObject);
+    }
+
+    if (activeResultAction === "nfa" || activeResultAction === "combinedNfa" || activeResultAction === "dfa") {
+      const panels = buildAutomatonPanels(activeResultAction, activeResultObject);
+      if (panels.length === 0) {
+        return <div className="graph-empty">No hay estructura de autómata para renderizar.</div>;
+      }
+      return <div className="graph-panels">{panels.map((panel) => renderAutomatonSvg(panel))}</div>;
+    }
+
+    return <div className="graph-empty">Esta etapa no tiene visualización gráfica todavía.</div>;
+  }
 
   function pushOutput(type: OutputItem["type"], text: string) {
     setOutput((prev) => [...prev, { ts: nowTime(), type, text }]);
@@ -515,6 +885,7 @@ export function App() {
     const formatted = JSON.stringify(parsed.result, null, 2);
     setLatestResult(formatted);
     setActionResults((prev) => ({ ...prev, [action]: formatted }));
+    setActionResultObjects((prev) => ({ ...prev, [action]: parsed.result }));
     setActiveResultAction(action);
     pushOutput("ok", `${action} finalizado correctamente.`);
     return true;
@@ -1143,7 +1514,7 @@ export function App() {
 
           <section className="result-panel" style={{ height: `${resultPanelHeight}px` }}>
             <div className="result-header">
-              <div className="panel-title panel-title-tight">Resultado JSON</div>
+              <div className="panel-title panel-title-tight">Resultado</div>
               {visibleResultActions.length > 0 && (
                 <div className="result-tabs" role="tablist" aria-label="Etapas del pipeline">
                   {visibleResultActions.map((action) => {
@@ -1163,8 +1534,29 @@ export function App() {
                   })}
                 </div>
               )}
+              <div className="result-view-toggle">
+                <button
+                  type="button"
+                  className={`result-view-btn ${resultViewMode === "json" ? "active" : ""}`}
+                  onClick={() => setResultViewMode("json")}
+                >
+                  JSON
+                </button>
+                <button
+                  type="button"
+                  className={`result-view-btn ${resultViewMode === "graph" ? "active" : ""}`}
+                  onClick={() => setResultViewMode("graph")}
+                  disabled={!canRenderGraph}
+                >
+                  Gráfico
+                </button>
+              </div>
             </div>
-            <pre className="result-view">{activeResultText}</pre>
+            {resultViewMode === "graph" && canRenderGraph ? (
+              <div className="result-graph-view">{renderGraphView()}</div>
+            ) : (
+              <pre className="result-view">{activeResultText}</pre>
+            )}
           </section>
         </section>
       </main>
