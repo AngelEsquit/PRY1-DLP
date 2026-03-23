@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -43,6 +44,15 @@ fn detect_workspace_root() -> PathBuf {
     cwd
 }
 
+fn strip_windows_extended_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy().to_string();
+    if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path
+    }
+}
+
 #[tauri::command]
 fn ping() -> String {
     "pong".to_string()
@@ -52,7 +62,8 @@ fn ping() -> String {
 fn get_workspace_root(_app: tauri::AppHandle) -> Result<String, String> {
     let root = detect_workspace_root();
     let normalized = root.canonicalize().unwrap_or(root);
-    Ok(normalized.to_string_lossy().to_string())
+    let clean = strip_windows_extended_prefix(normalized);
+    Ok(clean.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -210,6 +221,20 @@ fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<Str
     }
 }
 
+fn normalize_payload_json(payload_json: &str) -> Result<String, String> {
+    let parsed: Value = serde_json::from_str(payload_json)
+        .map_err(|e| format!("Payload JSON inválido: {e}"))?;
+
+    // If payload arrived as a JSON-encoded string, decode one extra layer.
+    let normalized = match parsed {
+        Value::String(inner) => serde_json::from_str::<Value>(&inner).unwrap_or(Value::String(inner)),
+        other => other,
+    };
+
+    serde_json::to_string(&normalized)
+        .map_err(|e| format!("No se pudo serializar payload normalizado: {e}"))
+}
+
 fn resolve_bridge_script(workspace_root: &str) -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
@@ -229,7 +254,8 @@ fn resolve_bridge_script(workspace_root: &str) -> Result<PathBuf, String> {
         let script = base.join("src").join("bridge_cli.py");
         tried.push(script.to_string_lossy().to_string());
         if script.exists() {
-            return Ok(script);
+            let canonical = script.canonicalize().unwrap_or(script);
+            return Ok(strip_windows_extended_prefix(canonical));
         }
     }
 
@@ -245,6 +271,7 @@ fn run_yalex_bridge(workspace_root: String, payload_json: String) -> Result<Stri
     let script_str = script
         .to_str()
         .ok_or_else(|| "Ruta de bridge inválida".to_string())?;
+    let normalized_payload = normalize_payload_json(&payload_json)?;
 
     let candidates: &[(&str, &[&str])] = &[
         ("/usr/bin/python3", &[script_str]),
@@ -255,7 +282,7 @@ fn run_yalex_bridge(workspace_root: String, payload_json: String) -> Result<Stri
 
     let mut last_error = String::new();
     for (program, args) in candidates {
-        match run_python_command(program, args, &payload_json) {
+        match run_python_command(program, args, &normalized_payload) {
             Ok(output) => return Ok(output),
             Err(error) => last_error = error,
         }

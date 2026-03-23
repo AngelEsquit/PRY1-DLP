@@ -69,6 +69,25 @@ def _to_json_ready_trace(step):
     }
 
 
+def _normalize_path(raw: str) -> Path:
+    r"""Normalize a path string coming from the Tauri/Windows layer.
+
+    Handles two Windows-specific issues:
+    1. Double-escaped separators (C:\\\\Users\\\\...) caused by the path
+       being JSON-serialized more than once in the Rust/JS pipeline.
+    2. Extended-length prefix (\\?\) added by Windows canonicalize().
+    """
+    s = raw.strip()
+    # Detect double-escaped Windows paths: consecutive \\ where \ is the
+    # intended separator. Only applies when there are no forward slashes.
+    if "\\\\" in s and "/" not in s:
+        s = s.replace("\\\\", "\\")
+    # Strip Windows extended-length prefix \\?\ (after unescaping)
+    if s.startswith("\\\\?\\"):
+        s = s[4:]
+    return Path(s)
+
+
 def _run_action(payload: dict) -> dict:
     action = payload.get("action")
     yal_path_raw = payload.get("yalPath")
@@ -80,7 +99,7 @@ def _run_action(payload: dict) -> dict:
     if yal_source_raw is not None:
         source = str(yal_source_raw)
     elif yal_path_raw:
-        source = Path(yal_path_raw).read_text(encoding="utf-8")
+        source = _normalize_path(yal_path_raw).read_text(encoding="utf-8")
     else:
         raise ValueError("Debe enviar 'yalPath' o 'yalSource'")
 
@@ -148,7 +167,7 @@ def _run_action(payload: dict) -> dict:
         if input_text_raw is not None:
             text = str(input_text_raw)
         elif input_path_raw:
-            text = Path(input_path_raw).read_text(encoding="utf-8")
+            text = _normalize_path(input_path_raw).read_text(encoding="utf-8")
         else:
             raise ValueError("Para tokenizar debe enviar 'inputPath' o 'inputText'")
 
@@ -175,7 +194,7 @@ def _run_action(payload: dict) -> dict:
         output_path_raw = payload.get("outputPath")
         if not output_path_raw:
             raise ValueError("Para generar lexer debe enviar 'outputPath'")
-        output_path = Path(output_path_raw)
+        output_path = _normalize_path(output_path_raw)
         code = generate_lexer(dfa, spec.header, spec.trailer, output_path=output_path)
         return {
             "outputPath": str(output_path),
@@ -191,6 +210,10 @@ def main() -> int:
         if not raw.strip():
             raise ValueError("Request vacío en stdin")
         payload = json.loads(raw)
+        # Extract inputPath for diagnosis if present
+        input_path_raw = payload.get("inputPath")
+        if input_path_raw is not None:
+            print(f"[DEBUG inputPath repr]: {repr(input_path_raw)}", file=sys.stderr)
         result = _run_action(payload)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
         return 0

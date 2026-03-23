@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.angel.yalexstudio",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node scripts/start-vite-if-needed.mjs",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:1420"
