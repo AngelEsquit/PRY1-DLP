@@ -219,12 +219,13 @@ def _is_skip_action(action: str) -> bool:
 
 def _extract_token_type(action: str) -> str:
     """Extrae el nombre del token de una acción tipo 'return \"TOKEN\"'."""
-    import re as _re
-    # Patrón: return "TOKEN" o return 'TOKEN'
-    m = _re.match(r'''^\s*return\s+["']([^"']+)["']\s*$''', action)
-    if m:
-        return m.group(1)
-    # Si no matchea, devolver la acción tal cual
+    # Parse return statements without regex: return "TOKEN" or return 'TOKEN'
+    stripped = action.strip()
+    if stripped.startswith("return"):
+        rest = stripped[len("return"):].strip()
+        if len(rest) >= 2 and rest[0] in ('"', "'") and rest[-1] == rest[0]:
+            return rest[1:-1]
+    # Si no matchea el patrón, devolver la acción tal cual
     return action
 
 

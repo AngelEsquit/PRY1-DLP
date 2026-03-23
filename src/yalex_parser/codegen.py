@@ -8,7 +8,6 @@ El archivo generado NO depende del generador (yalex_parser).
 from __future__ import annotations
 
 import json
-import re
 import textwrap
 from pathlib import Path
 
@@ -32,9 +31,12 @@ def _clean_action(action: str) -> str | None:
     if "skip" in lower and ("(" in lower or lower.endswith("skip")):
         return None
 
-    m = re.match(r'''^return\s+["']([^"']+)["']\s*$''', action)
-    if m:
-        return m.group(1)
+    # Parse return statements without regex: return "TOKEN" or return 'TOKEN'
+    stripped = action.strip()
+    if stripped.startswith("return"):
+        rest = stripped[len("return"):].strip()
+        if len(rest) >= 2 and rest[0] in ('"', "'") and rest[-1] == rest[0]:
+            return rest[1:-1]
 
     return action
 
