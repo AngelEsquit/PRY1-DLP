@@ -162,6 +162,10 @@ fn delete_file(path: String) -> Result<(), String> {
 fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<String, String> {
     let mut child = Command::new(program)
         .args(args)
+        .env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -193,23 +197,31 @@ fn run_python_command(program: &str, args: &[&str], payload: &str) -> Result<Str
 }
 
 #[tauri::command]
-fn run_yalex_bridge(payload_json: String) -> Result<String, String> {
-    let script = detect_workspace_root().join("src").join("bridge_cli.py");
+fn run_yalex_bridge(workspace_root: String, payload_json: String) -> Result<String, String> {
+    let script = PathBuf::from(&workspace_root).join("src").join("bridge_cli.py");
     let script_str = script
         .to_str()
         .ok_or_else(|| "Ruta de bridge inválida".to_string())?;
 
-    let try1 = run_python_command("python3", &[script_str], &payload_json);
-    if let Ok(ok) = try1 {
-        return Ok(ok);
+    let candidates: &[(&str, &[&str])] = &[
+        ("/usr/bin/python3", &[script_str]),
+        ("python", &[script_str]),
+        ("python3", &[script_str]),
+        ("py", &["-3", script_str]),
+    ];
+
+    let mut last_error = String::new();
+    for (program, args) in candidates {
+        match run_python_command(program, args, &payload_json) {
+            Ok(output) => return Ok(output),
+            Err(error) => last_error = error,
+        }
     }
 
-    let try2 = run_python_command("python", &[script_str], &payload_json);
-    if let Ok(ok) = try2 {
-        return Ok(ok);
-    }
-
-    run_python_command("py", &["-3", script_str], &payload_json)
+    Err(format!(
+        "No se encontró Python en el sistema. Intentados: python, python3, py. Último error: {}",
+        last_error
+    ))
 }
 
 pub fn run() {

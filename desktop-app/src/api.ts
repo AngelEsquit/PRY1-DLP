@@ -130,6 +130,7 @@ export async function deleteFile(path: string): Promise<void> {
 }
 
 export async function runYalex(payload: {
+  workspaceRoot: string;
   action: YalexAction;
   yalPath?: string;
   yalSource?: string;
@@ -139,6 +140,10 @@ export async function runYalex(payload: {
   traceLimit?: number;
   outputPath?: string;
 }): Promise<unknown> {
-  const raw = await invokeTauri<string>("run_yalex_bridge", { payloadJson: JSON.stringify(payload) });
+  const { workspaceRoot, ...rest } = payload;
+  const raw = await invokeTauri<string>("run_yalex_bridge", {
+    workspaceRoot,
+    payloadJson: JSON.stringify(rest),
+  });
   return JSON.parse(raw);
 }

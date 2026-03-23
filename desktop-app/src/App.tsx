@@ -484,6 +484,7 @@ export function App() {
       setIsRunningAction(true);
       pushOutput("info", `Ejecutando acción: ${action}`);
       const response = await runYalex({
+        workspaceRoot,
         action,
         yalPath,
         yalSource,
