@@ -1,4 +1,3 @@
-import saveIcon from "../src-tauri/icons/svg/save.svg";
 import {
   useEffect,
   useMemo,
@@ -6,10 +5,12 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import Editor, { type Monaco } from "@monaco-editor/react";
+import Editor, { loader, type Monaco } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
 import {
   createDirectory,
   getWorkspaceRoot,
+  isTauriRuntime,
   listEntries,
   pickDirectory,
   readTextFile,
@@ -17,8 +18,12 @@ import {
   writeTextFile,
 } from "./api";
 import type { FileNode, OpenTab, YalexAction } from "./types";
-import filePlusIcon from "../src-tauri/icons/svg/file-plus.svg";
-import folderPlusIcon from "../src-tauri/icons/svg/folder-plus.svg";
+
+loader.config({ monaco });
+
+const saveIcon = "/icons/save.svg";
+const filePlusIcon = "/icons/file-plus.svg";
+const folderPlusIcon = "/icons/folder-plus.svg";
 
 type OutputItem = {
   ts: string;
@@ -415,6 +420,7 @@ export function App() {
         setYalFilePath(path);
       }
       pushOutput("ok", `Archivo abierto: ${name}`);
+      setIsRunningAction(false);
     } catch (error) {
       console.error("[openFile] Error opening file:", error);
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -593,32 +599,51 @@ export function App() {
     didBootstrapRef.current = true;
 
     async function bootstrap() {
+      const safetyTimeout = setTimeout(() => {
+        console.warn("[Bootstrap] Safety timeout reached — forcing isInitializing=false");
+        setIsInitializing(false);
+        setInitError("Timeout de inicialización: Tauri tardó demasiado en responder.");
+      }, 20000);
+
       try {
         console.log("[Bootstrap] Starting initialization...");
-        
-        // Give Tauri a moment to initialize its API
-        // This is important because Tauri 2.x may not have injected invoke() immediately
-        await new Promise(resolve => setTimeout(resolve, 500));
-        console.log("[Bootstrap] Tauri init delay complete, calling getWorkspaceRoot...");
-        
+
+        let tauriReady = false;
+        for (let i = 0; i < 12; i++) {
+          if (isTauriRuntime()) {
+            tauriReady = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+
+        if (!tauriReady) {
+          throw new Error(
+            "Tauri runtime no detectado después de 3s. Asegúrate de correr con `npm run tauri -- dev`."
+          );
+        }
+
+        console.log("[Bootstrap] Tauri detected, calling getWorkspaceRoot...");
+
         const root = await getWorkspaceRoot();
         console.log("[Bootstrap] Got workspace root:", root);
-        
+
         setYalFilePath(joinPath(root, "examples", "simple.yal"));
         setInputFilePath(joinPath(root, "tests", "input", "low.txt"));
         setGenerateOutputPath(joinPath(root, "output", "lexer_generated_tauri.py"));
-        
+
         console.log("[Bootstrap] Opening workspace root...");
         await openWorkspaceRoot(root);
         console.log("[Bootstrap] Workspace root opened successfully");
-        setIsInitializing(false); // Mark initialization complete
         setInitError(""); // Clear any errors
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error("[Bootstrap] Initialization failed:", error);
         setInitError(errorMsg);
-        setIsInitializing(false); // Stop loading even if we fail
         pushOutput("error", `No se pudo inicializar la app: ${errorMsg}`);
+      } finally {
+        clearTimeout(safetyTimeout);
+        setIsInitializing(false);
       }
     }
     void bootstrap();
@@ -699,6 +724,18 @@ export function App() {
     window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(payload));
   }, [sidebarWidth, rightPanelWidth, resultPanelHeight, outputPanelHeight]);
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        void saveActiveTab();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTab, tabs]);
+
   return (
     <>
       {isInitializing && (
@@ -732,7 +769,14 @@ export function App() {
       <header className="topbar">
         <h1>YALex Studio</h1>
         <div className="topbar-actions">
-          <button className="topbar-action-btn" onClick={() => void saveActiveTab()}>
+          <button
+            className="topbar-action-btn"
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              void saveActiveTab();
+            }}
+          >
             <span
               className="panel-icon topbar-icon"
               style={{

@@ -44,5 +44,5 @@ echo "[INFO] Environment cleaned for system glibc"
 echo "[INFO] Using cargo: $(which cargo)"
 echo "[INFO] Cargo version: $(cargo --version 2>&1)"
 
-# Run Tauri dev
-exec npm run tauri -- dev "$@"
+# Run Tauri dev without watcher to avoid app restarts when saving workspace data files
+exec npm run tauri -- dev --no-watch "$@"

@@ -199,12 +199,16 @@ fn run_yalex_bridge(payload_json: String) -> Result<String, String> {
         .to_str()
         .ok_or_else(|| "Ruta de bridge inválida".to_string())?;
 
-    let first_try = run_python_command("python", &[script_str], &payload_json);
-    if let Ok(ok) = first_try {
+    let try1 = run_python_command("python3", &[script_str], &payload_json);
+    if let Ok(ok) = try1 {
         return Ok(ok);
     }
 
-    // Fallback común en Windows: py -3
+    let try2 = run_python_command("python", &[script_str], &payload_json);
+    if let Ok(ok) = try2 {
+        return Ok(ok);
+    }
+
     run_python_command("py", &["-3", script_str], &payload_json)
 }
 
