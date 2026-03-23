@@ -274,9 +274,9 @@ fn run_yalex_bridge(workspace_root: String, payload_json: String) -> Result<Stri
     let normalized_payload = normalize_payload_json(&payload_json)?;
 
     let candidates: &[(&str, &[&str])] = &[
-        ("/usr/bin/python3", &[script_str]),
-        ("python", &[script_str]),
         ("python3", &[script_str]),
+        ("python", &[script_str]),
+        ("/usr/bin/python3", &[script_str]),
         ("py", &["-3", script_str]),
     ];
 
