@@ -2,6 +2,7 @@ import saveIcon from "../src-tauri/icons/svg/save.svg";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
@@ -216,6 +217,8 @@ export function App() {
   const [tokenizeText, setTokenizeText] = useState<string>("a a a\n");
   const [selectedAction, setSelectedAction] = useState<YalexAction>("spec");
   const [isRunningAction, setIsRunningAction] = useState<boolean>(false);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true); // Show loading state while Tauri initializes
+  const [initError, setInitError] = useState<string>(""); // Track initialization errors
   const [sidebarWidth, setSidebarWidth] = useState<number>(restoredSizes?.sidebarWidth ?? 290);
   const [rightPanelWidth, setRightPanelWidth] = useState<number>(
     restoredSizes?.rightPanelWidth ?? 340
@@ -401,7 +404,9 @@ export function App() {
       return;
     }
     try {
+      console.log("[openFile] Opening file:", path);
       const content = await readTextFile(path);
+      console.log("[openFile] File content loaded successfully,  length:", content.length);
       const name = path.split(/[/\\]/).pop() || path;
       const tab: OpenTab = { path, name, content, dirty: false };
       setTabs((prev) => [...prev, tab]);
@@ -409,8 +414,11 @@ export function App() {
       if (name.endsWith(".yal")) {
         setYalFilePath(path);
       }
+      pushOutput("ok", `Archivo abierto: ${name}`);
     } catch (error) {
-      pushOutput("error", `No se pudo abrir archivo ${path}: ${String(error)}`);
+      console.error("[openFile] Error opening file:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      pushOutput("error", `No se pudo abrir archivo ${path}: ${errorMsg}`);
     }
   }
 
@@ -576,16 +584,41 @@ export function App() {
     return rows;
   }
 
+  const didBootstrapRef = useRef<boolean>(false);
+
   useEffect(() => {
+    if (didBootstrapRef.current) {
+      return;
+    }
+    didBootstrapRef.current = true;
+
     async function bootstrap() {
       try {
+        console.log("[Bootstrap] Starting initialization...");
+        
+        // Give Tauri a moment to initialize its API
+        // This is important because Tauri 2.x may not have injected invoke() immediately
+        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log("[Bootstrap] Tauri init delay complete, calling getWorkspaceRoot...");
+        
         const root = await getWorkspaceRoot();
+        console.log("[Bootstrap] Got workspace root:", root);
+        
         setYalFilePath(joinPath(root, "examples", "simple.yal"));
         setInputFilePath(joinPath(root, "tests", "input", "low.txt"));
         setGenerateOutputPath(joinPath(root, "output", "lexer_generated_tauri.py"));
+        
+        console.log("[Bootstrap] Opening workspace root...");
         await openWorkspaceRoot(root);
+        console.log("[Bootstrap] Workspace root opened successfully");
+        setIsInitializing(false); // Mark initialization complete
+        setInitError(""); // Clear any errors
       } catch (error) {
-        pushOutput("error", `No se pudo inicializar la app: ${String(error)}`);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error("[Bootstrap] Initialization failed:", error);
+        setInitError(errorMsg);
+        setIsInitializing(false); // Stop loading even if we fail
+        pushOutput("error", `No se pudo inicializar la app: ${errorMsg}`);
       }
     }
     void bootstrap();
@@ -667,6 +700,34 @@ export function App() {
   }, [sidebarWidth, rightPanelWidth, resultPanelHeight, outputPanelHeight]);
 
   return (
+    <>
+      {isInitializing && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#0D1B2A",
+          zIndex: 9999,
+          color: "#DBE4FF",
+          fontFamily: "monospace",
+        }}>
+          <div style={{ textAlign: "center" }}>
+            <h2>Inicializando YALex Studio...</h2>
+            {initError && (
+              <div style={{ color: "#FF6B6B", marginTop: "20px", maxWidth: "500px", wordBreak: "break-word" }}>
+                <p><strong>Error:</strong></p>
+                <p>{initError}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     <div className="shell" style={{ gridTemplateRows: `44px 1fr 6px ${outputPanelHeight}px` }}>
       <header className="topbar">
         <h1>YALex Studio</h1>
@@ -987,5 +1048,6 @@ export function App() {
         </div>
       </section>
     </div>
+    </>
   );
 }

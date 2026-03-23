@@ -9,6 +9,15 @@ const cargoBin = isWin ? `${os.homedir()}\\.cargo\\bin` : `${os.homedir()}/.carg
 const cargoExe = isWin ? `${cargoBin}\\cargo.exe` : `${cargoBin}/cargo`;
 const require = createRequire(import.meta.url);
 
+function hasCargoAvailable(environment) {
+  const probe = spawnSync("cargo", ["--version"], {
+    stdio: "ignore",
+    env: environment,
+    shell: false,
+  });
+  return probe.status === 0;
+}
+
 const env = { ...process.env };
 const currentPath = String(env.PATH || env.Path || "");
 if (existsSync(cargoBin) && !currentPath.includes(cargoBin)) {
@@ -20,9 +29,9 @@ if (existsSync(cargoBin) && !currentPath.includes(cargoBin)) {
   env.Path = currentPath;
 }
 
-if (!existsSync(cargoExe)) {
-  console.error("No se encontro cargo en ~/.cargo/bin.");
-  console.error("Instala Rust con rustup: https://rustup.rs/");
+if (!existsSync(cargoExe) && !hasCargoAvailable(env)) {
+  console.error("No se encontro cargo (ni en ~/.cargo/bin ni en PATH).");
+  console.error("Instala Rust con rustup o agrega cargo al PATH: https://rustup.rs/");
   process.exit(1);
 }
 

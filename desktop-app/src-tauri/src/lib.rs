@@ -26,6 +26,11 @@ fn detect_workspace_root() -> PathBuf {
 }
 
 #[tauri::command]
+fn ping() -> String {
+    "pong".to_string()
+}
+
+#[tauri::command]
 fn get_workspace_root(_app: tauri::AppHandle) -> Result<String, String> {
     let root = detect_workspace_root();
     let normalized = root.canonicalize().unwrap_or(root);
@@ -206,6 +211,7 @@ fn run_yalex_bridge(payload_json: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            ping,
             get_workspace_root,
             list_entries,
             read_text_file,

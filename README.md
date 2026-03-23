@@ -166,6 +166,14 @@ py -3 -m unittest discover -s tests -p "test_*.py" -v
 
 - Error al correr npm run tauri dev desde la raíz: ejecutar dentro de desktop-app.
 - Si falla el comando en tu shell, usar: `npm run tauri -- dev`.
+- Error `Cannot read properties of undefined (reading 'invoke')`: la UI se abrió fuera de Tauri (por ejemplo con `npm run dev`). Iniciar con `npm run tauri -- dev` dentro de `desktop-app`.
+- En Linux (Ubuntu), si aparece error de `gdk-3.0` / `pkg-config` / `webkit`: instalar dependencias nativas de Tauri:
+    `sudo apt update && sudo apt install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev`
+- **Error de símbolo de glibc en Linux (con snaps instalados):** `symbol lookup error: libpthread.so.0: undefined symbol __libc_pthread_init`. Causa: snap proporciona una versión antigua 
+de libc que entra en conflicto con las bibliotecas nativas. **Solución:**
+    1. Verificar que existe script de lanzamiento limpie: `ls desktop-app/scripts/launch-clean.sh`
+    2. Usar el launch script limpio en lugar de npm directo: `cd desktop-app && bash scripts/launch-clean.sh`
+    3. (Alternativa manual) Ejecutar con `LD_PRELOAD=/lib/x86_64-linux-gnu/libc.so.6:/ lib/x86_64-linux-gnu/libpthread.so.0 npm run tauri -- dev`
 - Error de cargo o rustc no encontrado: instalar Rust y reiniciar terminal.
 - Error de linker en Windows: instalar MSVC Build Tools.
 - Puerto ocupado de Vite: cerrar instancia anterior o reiniciar la app.
