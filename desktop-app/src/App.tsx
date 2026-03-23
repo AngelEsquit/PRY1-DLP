@@ -86,6 +86,13 @@ type GraphPanel = {
   edges: GraphEdge[];
 };
 
+type ValidationCheck = {
+  id: YalexAction;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -422,6 +429,8 @@ export function App() {
   >({});
   const [activeResultAction, setActiveResultAction] = useState<YalexAction | null>(null);
   const [resultViewMode, setResultViewMode] = useState<"json" | "graph">("graph");
+  const [validationChecks, setValidationChecks] = useState<ValidationCheck[]>([]);
+  const [validationRunAt, setValidationRunAt] = useState<string>("");
 
   const [yalFilePath, setYalFilePath] = useState<string>("");
   const [inputFilePath, setInputFilePath] = useState<string>("");
@@ -478,6 +487,100 @@ export function App() {
   const canRenderGraph = Boolean(
     activeResultAction && graphSupportedActions.includes(activeResultAction) && activeResultObject
   );
+
+  const passedChecks = validationChecks.filter((check) => check.ok).length;
+  const totalChecks = validationChecks.length;
+
+  function buildValidationChecks(
+    results: Partial<Record<YalexAction, unknown>>
+  ): ValidationCheck[] {
+    const specRoot = asObject(results.spec);
+    const spec = specRoot ? asObject(specRoot.spec) : null;
+
+    const astRoot = asObject(results.ast);
+    const regexAst = astRoot ? asObject(astRoot.regex_ast) : null;
+
+    const nfaRoot = asObject(results.nfa);
+    const thompsonNfa = nfaRoot ? asObject(nfaRoot.thompson_nfa) : null;
+
+    const combinedRoot = asObject(results.combinedNfa);
+    const combinedNfa = combinedRoot ? asObject(combinedRoot.combined_nfa) : null;
+
+    const dfaRoot = asObject(results.dfa);
+    const dfa = dfaRoot ? asObject(dfaRoot.dfa) : null;
+
+    const tokenize = asObject(results.tokenize);
+    const generate = asObject(results.generate);
+
+    return [
+      {
+        id: "spec",
+        label: "Spec",
+        ok: Boolean(spec && Array.isArray(spec.lets)),
+        detail: spec ? `lets=${asArray(spec.lets).length}` : "Sin resultado de spec",
+      },
+      {
+        id: "ast",
+        label: "AST",
+        ok: Boolean(regexAst && Array.isArray(regexAst.lets)),
+        detail: regexAst
+          ? `lets=${asArray(regexAst.lets).length}, alts=${asArray(regexAst.rule_alternatives).length}`
+          : "Sin resultado de ast",
+      },
+      {
+        id: "nfa",
+        label: "NFA",
+        ok: Boolean(thompsonNfa && (asArray(thompsonNfa.lets).length + asArray(thompsonNfa.rule_alternatives).length > 0)),
+        detail: thompsonNfa
+          ? `lets=${asArray(thompsonNfa.lets).length}, alts=${asArray(thompsonNfa.rule_alternatives).length}`
+          : "Sin resultado de nfa",
+      },
+      {
+        id: "combinedNfa",
+        label: "Combined NFA",
+        ok: Boolean(combinedNfa && asArray(combinedNfa.transitions).length > 0),
+        detail: combinedNfa
+          ? `states=${asArray(combinedNfa.states).length}, trans=${asArray(combinedNfa.transitions).length}`
+          : "Sin resultado de combinedNfa",
+      },
+      {
+        id: "dfa",
+        label: "DFA",
+        ok: Boolean(dfa && asArray(dfa.states).length > 0 && asArray(dfa.transitions).length > 0),
+        detail: dfa
+          ? `states=${asArray(dfa.states).length}, trans=${asArray(dfa.transitions).length}`
+          : "Sin resultado de dfa",
+      },
+      {
+        id: "tokenize",
+        label: "Tokenize",
+        ok: Boolean(tokenize && Array.isArray(tokenize.tokens) && Array.isArray(tokenize.errors)),
+        detail: tokenize
+          ? `tokens=${asArray(tokenize.tokens).length}, errors=${asArray(tokenize.errors).length}`
+          : "Sin resultado de tokenize",
+      },
+      {
+        id: "generate",
+        label: "Generate",
+        ok: Boolean(generate && asString(generate.outputPath) && (asNumber(generate.bytes) ?? 0) > 0),
+        detail: generate
+          ? `bytes=${asNumber(generate.bytes) ?? 0}`
+          : "Sin resultado de generate",
+      },
+    ];
+  }
+
+  function runValidationFromCurrentResults() {
+    const checks = buildValidationChecks(actionResultObjects);
+    setValidationChecks(checks);
+    const passCount = checks.filter((check) => check.ok).length;
+    setValidationRunAt(nowTime());
+    if (passCount === checks.length) {
+      pushOutput("ok", `Validación completa OK (${passCount}/${checks.length}).`);
+    } else {
+      pushOutput("error", `Validación con fallos (${passCount}/${checks.length}).`);
+    }
+  }
 
   function renderRegexNodeTree(node: unknown, keyPrefix: string): JSX.Element {
     const obj = asObject(node);
@@ -907,6 +1010,8 @@ export function App() {
 
     try {
       setIsRunningAction(true);
+      setValidationChecks([]);
+      setValidationRunAt("");
       pushOutput("info", `Ejecutando acción: ${action}`);
       await executeAction(action, yalPath, yalSource);
     } catch (error) {
@@ -916,15 +1021,15 @@ export function App() {
     }
   }
 
-  async function runFullPipeline() {
+  async function runFullPipeline(): Promise<boolean> {
     if (!workspaceRoot) {
       pushOutput("error", "No hay workspace abierto.");
-      return;
+      return false;
     }
 
     if (!yalFilePath && !activeTab?.name.endsWith(".yal")) {
       pushOutput("error", "Seleccione o abra un archivo .yal antes de ejecutar acciones.");
-      return;
+      return false;
     }
 
     const yalSource = activeTab?.name.endsWith(".yal") ? activeTab.content : undefined;
@@ -932,6 +1037,8 @@ export function App() {
 
     try {
       setIsRunningAction(true);
+      setValidationChecks([]);
+      setValidationRunAt("");
       pushOutput("info", "Iniciando ejecución secuencial de todo el pipeline.");
 
       for (let index = 0; index < FULL_PIPELINE_ACTIONS.length; index++) {
@@ -945,16 +1052,27 @@ export function App() {
         const ok = await executeAction(nextAction, yalPath, yalSource);
         if (!ok) {
           pushOutput("error", `Pipeline detenido en '${nextAction}'.`);
-          return;
+          return false;
         }
       }
 
       pushOutput("ok", "Pipeline completo finalizado correctamente.");
+      return true;
     } catch (error) {
       pushOutput("error", `Fallo al ejecutar pipeline completo: ${String(error)}`);
+      return false;
     } finally {
       setIsRunningAction(false);
     }
+  }
+
+  async function runFullPipelineAndValidate() {
+    const ok = await runFullPipeline();
+    if (!ok) {
+      runValidationFromCurrentResults();
+      return;
+    }
+    runValidationFromCurrentResults();
   }
 
   function renderTree(path: string, depth: number) {
@@ -1489,6 +1607,39 @@ export function App() {
               >
                 {isRunningAction ? "Pipeline en ejecución..." : "Ejecutar todo (secuencial)"}
               </button>
+
+              <button
+                className="run-validate-btn"
+                onClick={() => void runFullPipelineAndValidate()}
+                disabled={isRunningAction}
+              >
+                {isRunningAction ? "Validando..." : "Ejecutar todo + validar"}
+              </button>
+
+              <button
+                className="run-check-btn"
+                onClick={() => runValidationFromCurrentResults()}
+                disabled={isRunningAction}
+              >
+                Validar resultados actuales
+              </button>
+
+              {validationChecks.length > 0 && (
+                <section className="validation-panel">
+                  <div className="validation-header">
+                    <strong>{`Validación ${passedChecks}/${totalChecks}`}</strong>
+                    <span>{validationRunAt ? `@ ${validationRunAt}` : ""}</span>
+                  </div>
+                  <div className="validation-list">
+                    {validationChecks.map((check) => (
+                      <div key={check.id} className={`validation-item ${check.ok ? "ok" : "fail"}`}>
+                        <span className="validation-item-title">{check.label}</span>
+                        <span className="validation-item-detail">{check.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <p className="command-hint">{ACTION_HELP[selectedAction]}</p>
             </aside>
