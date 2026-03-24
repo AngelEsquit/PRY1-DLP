@@ -33,6 +33,7 @@ npm run tauri dev
 - Apertura y edición de archivos de texto en pestañas.
 - Guardado manual del archivo activo.
 - Ejecución del pipeline con una acción activa por vez: `spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`.
+- En modo de construcción directa, `nfa` se reporta como etapa omitida y `combinedNfa` expone artefactos del método directo (followpos/posiciones).
 - Campos contextuales por acción (solo se muestran cuando aplican).
 - Panel `Resultado JSON` para respuesta estructurada y panel `Output` para estado/errores.
 - Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia local de tamaños.

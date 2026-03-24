@@ -2,6 +2,7 @@ from .models import LetDefinition, RuleAlternative, RuleDefinition, YALexSpec
 from .parser import parse_yalex
 from .regex_ast import regex_node_to_dict
 from .regex_parser import parse_regex
+from .direct import build_direct_dfa, build_direct_artifacts, direct_artifacts_to_dict
 from .thompson import build_combined_nfa, build_thompson_nfa, combined_nfa_to_dict, nfa_to_dict
 from .dfa import DFA, DFAState, DFATransition, nfa_to_dfa, minimize_dfa, dfa_to_dict, dfa_to_table
 from .simulator import tokenize, tokenize_with_trace, Token, LexError, TraceStep
@@ -15,6 +16,9 @@ __all__ = [
     "parse_yalex",
     "parse_regex",
     "regex_node_to_dict",
+    "build_direct_dfa",
+    "build_direct_artifacts",
+    "direct_artifacts_to_dict",
     "build_thompson_nfa",
     "nfa_to_dict",
     "build_combined_nfa",

@@ -6,14 +6,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from yalex_parser import (
-    build_combined_nfa,
-    build_thompson_nfa,
-    combined_nfa_to_dict,
+    build_direct_artifacts,
+    direct_artifacts_to_dict,
     dfa_to_dict,
     dfa_to_table,
     minimize_dfa,
-    nfa_to_dfa,
-    nfa_to_dict,
     parse_regex,
     parse_yalex,
     regex_node_to_dict,
@@ -32,10 +29,10 @@ def _build_pipeline_from_source(source: str):
             label = alternative.action.strip() if alternative.action else f"ALT_{index}"
             combined_entries.append((label, parse_regex(alternative.regex)))
 
-    combined = build_combined_nfa(combined_entries, let_asts)
-    raw_dfa = nfa_to_dfa(combined)
+    direct = build_direct_artifacts(combined_entries, let_asts)
+    raw_dfa = direct.dfa
     dfa = minimize_dfa(raw_dfa)
-    return spec, let_asts, combined_entries, combined, dfa
+    return spec, direct, dfa
 
 
 def _to_json_ready_token(token):
@@ -120,7 +117,7 @@ def _run_action(payload: dict) -> dict:
     else:
         raise ValueError("Debe enviar 'yalPath' o 'yalSource'")
 
-    spec, let_asts, _combined_entries, combined, dfa = _build_pipeline_from_source(source)
+    spec, direct, dfa = _build_pipeline_from_source(source)
 
     if action == "spec":
         return {"spec": asdict(spec)}
@@ -146,28 +143,15 @@ def _run_action(payload: dict) -> dict:
         return {"regex_ast": {"lets": lets_ast, "rule_alternatives": rule_alternatives_ast}}
 
     if action == "nfa":
-        lets_nfa = [
-            {
-                "name": definition.name,
-                "nfa": nfa_to_dict(build_thompson_nfa(let_asts[definition.name], let_asts)),
+        return {
+            "direct_method": {
+                "message": "No se genera AFN en el método directo.",
+                "omitted_stage": "thompson_nfa",
             }
-            for definition in spec.lets
-        ]
-        rule_alternatives_nfa = []
-        if spec.rule is not None:
-            for index, alternative in enumerate(spec.rule.alternatives):
-                alt_ast = parse_regex(alternative.regex)
-                rule_alternatives_nfa.append(
-                    {
-                        "index": index,
-                        "regex": alternative.regex,
-                        "nfa": nfa_to_dict(build_thompson_nfa(alt_ast, let_asts)),
-                    }
-                )
-        return {"thompson_nfa": {"lets": lets_nfa, "rule_alternatives": rule_alternatives_nfa}}
+        }
 
     if action == "combinedNfa":
-        return {"combined_nfa": combined_nfa_to_dict(combined)}
+        return {"direct_construction": direct_artifacts_to_dict(direct)}
 
     if action == "dfa":
         return {

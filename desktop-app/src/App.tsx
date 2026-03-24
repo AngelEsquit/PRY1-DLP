@@ -35,8 +35,8 @@ type OutputItem = {
 const YAL_ACTIONS: Array<{ id: YalexAction; label: string }> = [
   { id: "spec", label: "Spec (JSON)" },
   { id: "ast", label: "AST" },
-  { id: "nfa", label: "NFA" },
-  { id: "combinedNfa", label: "Combined NFA" },
+  { id: "nfa", label: "NFA (omitido)" },
+  { id: "combinedNfa", label: "Direct Construction" },
   { id: "dfa", label: "DFA" },
   { id: "tokenize", label: "Tokenize" },
   { id: "generate", label: "Generate Lexer" },
@@ -51,8 +51,8 @@ function getActionLabel(action: YalexAction): string {
 const ACTION_HELP: Record<YalexAction, string> = {
   spec: "Extrae la especificación parseada en JSON.",
   ast: "Construye y muestra el árbol sintáctico de regex.",
-  nfa: "Genera el AFN por reglas tokenizadas.",
-  combinedNfa: "Muestra el AFN combinado con prioridades.",
+  nfa: "En método directo no se construye AFN (etapa omitida).",
+  combinedNfa: "Muestra artefactos del método directo (followpos/posiciones).",
   dfa: "Construye y minimiza el AFD final.",
   tokenize: "Tokeniza una entrada por archivo o texto directo.",
   generate: "Genera un lexer Python autónomo.",
@@ -228,45 +228,13 @@ function buildAutomatonPanels(action: YalexAction, payload: unknown): GraphPanel
   const root = asObject(payload);
   if (!root) return [];
 
-  if (action === "combinedNfa") {
-    const combined = asObject(root.combined_nfa);
-    const panel = combined ? buildSingleAutomatonPanel(combined, "Combined NFA") : null;
-    return panel ? [panel] : [];
-  }
-
   if (action === "dfa") {
     const dfa = asObject(root.dfa);
     const panel = dfa ? buildSingleAutomatonPanel(dfa, "DFA", true) : null;
     return panel ? [panel] : [];
   }
 
-  if (action !== "nfa") {
-    return [];
-  }
-
-  const thompson = asObject(root.thompson_nfa);
-  if (!thompson) return [];
-
-  const panels: GraphPanel[] = [];
-  for (const letItem of asArray(thompson.lets)) {
-    const letObj = asObject(letItem);
-    if (!letObj) continue;
-    const letName = asString(letObj.name) ?? "let";
-    const nfa = asObject(letObj.nfa);
-    const panel = nfa ? buildSingleAutomatonPanel(nfa, `NFA let: ${letName}`) : null;
-    if (panel) panels.push(panel);
-  }
-
-  for (const altItem of asArray(thompson.rule_alternatives)) {
-    const altObj = asObject(altItem);
-    if (!altObj) continue;
-    const index = asNumber(altObj.index);
-    const nfa = asObject(altObj.nfa);
-    const panel = nfa ? buildSingleAutomatonPanel(nfa, `NFA alt ${index ?? "?"}`) : null;
-    if (panel) panels.push(panel);
-  }
-
-  return panels;
+  return [];
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -483,7 +451,7 @@ export function App() {
 
   const activeResultObject = activeResultAction ? actionResultObjects[activeResultAction] : null;
 
-  const graphSupportedActions: YalexAction[] = ["ast", "nfa", "combinedNfa", "dfa"];
+  const graphSupportedActions: YalexAction[] = ["ast", "dfa"];
   const canRenderGraph = Boolean(
     activeResultAction && graphSupportedActions.includes(activeResultAction) && activeResultObject
   );
@@ -501,10 +469,10 @@ export function App() {
     const regexAst = astRoot ? asObject(astRoot.regex_ast) : null;
 
     const nfaRoot = asObject(results.nfa);
-    const thompsonNfa = nfaRoot ? asObject(nfaRoot.thompson_nfa) : null;
+    const directMethod = nfaRoot ? asObject(nfaRoot.direct_method) : null;
 
     const combinedRoot = asObject(results.combinedNfa);
-    const combinedNfa = combinedRoot ? asObject(combinedRoot.combined_nfa) : null;
+    const directConstruction = combinedRoot ? asObject(combinedRoot.direct_construction) : null;
 
     const dfaRoot = asObject(results.dfa);
     const dfa = dfaRoot ? asObject(dfaRoot.dfa) : null;
@@ -530,17 +498,17 @@ export function App() {
       {
         id: "nfa",
         label: "NFA",
-        ok: Boolean(thompsonNfa && (asArray(thompsonNfa.lets).length + asArray(thompsonNfa.rule_alternatives).length > 0)),
-        detail: thompsonNfa
-          ? `lets=${asArray(thompsonNfa.lets).length}, alts=${asArray(thompsonNfa.rule_alternatives).length}`
+        ok: Boolean(directMethod && asString(directMethod.omitted_stage) === "thompson_nfa"),
+        detail: directMethod
+          ? asString(directMethod.message) ?? "Etapa omitida"
           : "Sin resultado de nfa",
       },
       {
         id: "combinedNfa",
-        label: "Combined NFA",
-        ok: Boolean(combinedNfa && asArray(combinedNfa.transitions).length > 0),
-        detail: combinedNfa
-          ? `states=${asArray(combinedNfa.states).length}, trans=${asArray(combinedNfa.transitions).length}`
+        label: "Direct Construction",
+        ok: Boolean(directConstruction && asObject(directConstruction.followpos)),
+        detail: directConstruction
+          ? `followpos=${Object.keys(asObject(directConstruction.followpos) ?? {}).length}, alphabet=${asNumber(directConstruction.alphabet_size) ?? 0}`
           : "Sin resultado de combinedNfa",
       },
       {
@@ -734,7 +702,7 @@ export function App() {
       return renderAstGraph(activeResultObject);
     }
 
-    if (activeResultAction === "nfa" || activeResultAction === "combinedNfa" || activeResultAction === "dfa") {
+    if (activeResultAction === "dfa") {
       const panels = buildAutomatonPanels(activeResultAction, activeResultObject);
       if (panels.length === 0) {
         return <div className="graph-empty">No hay estructura de autómata para renderizar.</div>;
