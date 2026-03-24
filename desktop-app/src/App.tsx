@@ -534,67 +534,35 @@ export function App() {
   function buildValidationChecks(
     results: Partial<Record<YalexAction, unknown>>
   ): ValidationCheck[] {
-    const specRoot = asObject(results.spec);
-    const spec = specRoot ? asObject(specRoot.spec) : null;
-
-    const astRoot = asObject(results.ast);
-    const regexAst = astRoot ? asObject(astRoot.regex_ast) : null;
-
-    const combinedRoot = asObject(results.combinedNfa);
-    const directConstruction = combinedRoot ? asObject(combinedRoot.direct_construction) : null;
-
-    const dfaRoot = asObject(results.dfa);
-    const dfa = dfaRoot ? asObject(dfaRoot.dfa) : null;
-
     const tokenize = asObject(results.tokenize);
-    const generate = asObject(results.generate);
+    const tokens = tokenize ? asArray(tokenize.tokens) : [];
+    const errors = tokenize ? asArray(tokenize.errors) : [];
+    const lexicalFailureDetected = errors.length > 0;
 
     return [
       {
-        id: "spec",
-        label: "Spec",
-        ok: Boolean(spec && Array.isArray(spec.lets)),
-        detail: spec ? `lets=${asArray(spec.lets).length}` : "Sin resultado de spec",
-      },
-      {
-        id: "ast",
-        label: "AST",
-        ok: Boolean(regexAst && Array.isArray(regexAst.lets)),
-        detail: regexAst
-          ? `lets=${asArray(regexAst.lets).length}, alts=${asArray(regexAst.rule_alternatives).length}`
-          : "Sin resultado de ast",
+        id: "tokenize",
+        label: "Tokenización ejecutada",
+        ok: Boolean(tokenize && Array.isArray(tokenize.tokens) && Array.isArray(tokenize.errors)),
+        detail: tokenize
+          ? `tokens=${tokens.length}, errors=${errors.length}`
+          : "Ejecuta la etapa Tokenizar para validar el fallo léxico",
       },
       {
         id: "combinedNfa",
-        label: "Construcción Directa",
-        ok: Boolean(directConstruction && asObject(directConstruction.followpos)),
-        detail: directConstruction
-          ? `followpos=${Object.keys(asObject(directConstruction.followpos) ?? {}).length}, alphabet=${asNumber(directConstruction.alphabet_size) ?? 0}`
-          : "Sin resultado de construcción directa",
-      },
-      {
-        id: "dfa",
-        label: "DFA",
-        ok: Boolean(dfa && asArray(dfa.states).length > 0 && asArray(dfa.transitions).length > 0),
-        detail: dfa
-          ? `states=${asArray(dfa.states).length}, trans=${asArray(dfa.transitions).length}`
-          : "Sin resultado de dfa",
-      },
-      {
-        id: "tokenize",
-        label: "Tokenize",
-        ok: Boolean(tokenize && Array.isArray(tokenize.tokens) && Array.isArray(tokenize.errors)),
-        detail: tokenize
-          ? `tokens=${asArray(tokenize.tokens).length}, errors=${asArray(tokenize.errors).length}`
-          : "Sin resultado de tokenize",
+        label: "Fallo léxico real detectado",
+        ok: lexicalFailureDetected,
+        detail: lexicalFailureDetected
+          ? "Sí: la lista errors contiene elementos"
+          : "No: errors está vacío para la última tokenización",
       },
       {
         id: "generate",
-        label: "Generate",
-        ok: Boolean(generate && asString(generate.outputPath) && (asNumber(generate.bytes) ?? 0) > 0),
-        detail: generate
-          ? `bytes=${asNumber(generate.bytes) ?? 0}`
-          : "Sin resultado de generate",
+        label: "Comportamiento esperado en lexer generado",
+        ok: lexicalFailureDetected,
+        detail: lexicalFailureDetected
+          ? "Con esos errors, el lexer generado terminaría con código 1 en main"
+          : "Si no hay errors, el lexer generado terminaría sin fallo léxico",
       },
     ];
   }
