@@ -82,6 +82,9 @@ type ValidationCheck = {
   detail: string;
 };
 
+type DfaEdgeLabelMode = "ranges" | "aliases";
+type DfaLabelDensity = "compact" | "detailed";
+
 function asObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -103,8 +106,18 @@ function asString(value: unknown): string | null {
 
 function formatCharLabel(raw: string): string {
   if (raw === "\n") return "\\n";
+  if (raw === "\r") return "\\r";
   if (raw === "\t") return "\\t";
   if (raw === " ") return "space";
+  if (raw === "\\") return "\\\\";
+
+  if (raw.length === 1) {
+    const code = raw.charCodeAt(0);
+    if (code < 32 || code === 127) {
+      return `\\x${code.toString(16).toUpperCase().padStart(2, "0")}`;
+    }
+  }
+
   return raw;
 }
 
@@ -124,10 +137,174 @@ function transitionLabel(transition: Record<string, unknown>): string {
   return kind;
 }
 
+function escapeCharForSetLiteral(ch: string): string {
+  if (ch === "\\") return "\\\\";
+  if (ch === "'") return "\\'";
+  if (ch === "\n") return "\\n";
+  if (ch === "\r") return "\\r";
+  if (ch === "\t") return "\\t";
+
+  if (ch.length === 1) {
+    const code = ch.charCodeAt(0);
+    if (code < 32 || code === 127) {
+      return `\\x${code.toString(16).toUpperCase().padStart(2, "0")}`;
+    }
+  }
+
+  return ch;
+}
+
+function buildCanonicalCodeSet(codes: number[]): string {
+  return codes.join(",");
+}
+
+function getKnownAliasDefinitions(): Array<{ name: string; codes: number[] }> {
+  const lower = Array.from({ length: 26 }, (_, i) => 97 + i);
+  const upper = Array.from({ length: 26 }, (_, i) => 65 + i);
+  const digits = Array.from({ length: 10 }, (_, i) => 48 + i);
+  const vowels = [65, 69, 73, 79, 85, 97, 101, 105, 111, 117].sort((a, b) => a - b);
+  const letter = [...upper, ...lower].sort((a, b) => a - b);
+  const vowelSet = new Set(vowels);
+  const consonant = letter.filter((code) => !vowelSet.has(code));
+  const ws = [9, 10, 13, 32];
+
+  return [
+    { name: "consonant", codes: consonant },
+    { name: "vowel", codes: vowels },
+    { name: "letter", codes: letter },
+    { name: "lower", codes: lower },
+    { name: "upper", codes: upper },
+    { name: "digit", codes: digits },
+    { name: "ws", codes: ws },
+  ];
+}
+
+function getAliasForCharCodes(codes: number[]): string | null {
+  const unique = Array.from(new Set(codes)).sort((a, b) => a - b);
+  const key = buildCanonicalCodeSet(unique);
+
+  const aliasMap = new Map<string, string>(
+    getKnownAliasDefinitions().map((entry) => [buildCanonicalCodeSet(entry.codes), entry.name])
+  );
+
+  return aliasMap.get(key) ?? null;
+}
+
+function factorAliasesFromCodes(codes: number[]): { aliases: string[]; remaining: number[] } {
+  const remaining = new Set(codes);
+  const aliases: string[] = [];
+
+  const definitions = getKnownAliasDefinitions().sort((a, b) => b.codes.length - a.codes.length);
+  for (const definition of definitions) {
+    const allPresent = definition.codes.every((code) => remaining.has(code));
+    if (!allPresent) {
+      continue;
+    }
+
+    aliases.push(definition.name);
+    for (const code of definition.codes) {
+      remaining.delete(code);
+    }
+  }
+
+  return {
+    aliases,
+    remaining: Array.from(remaining).sort((a, b) => a - b),
+  };
+}
+
+function formatCharSetLabel(chars: string[], mode: DfaEdgeLabelMode = "ranges"): string {
+  if (chars.length === 0) {
+    return "";
+  }
+
+  const sortedCodes = Array.from(new Set(chars.map((ch) => ch.charCodeAt(0)))).sort((a, b) => a - b);
+
+  const alias = getAliasForCharCodes(sortedCodes);
+  if (mode === "aliases" && alias) {
+    return alias;
+  }
+
+  if (mode === "aliases") {
+    const factored = factorAliasesFromCodes(sortedCodes);
+    if (factored.aliases.length > 0) {
+      const parts: string[] = [factored.aliases.join(" ")];
+      if (factored.remaining.length > 0) {
+        parts.push(formatCharSetLabel(factored.remaining.map((code) => String.fromCharCode(code)), "ranges"));
+      }
+      return parts.join("\n");
+    }
+  }
+
+  const ranges: Array<{ start: number; end: number }> = [];
+  let start = sortedCodes[0];
+  let end = sortedCodes[0];
+
+  for (let i = 1; i < sortedCodes.length; i++) {
+    const next = sortedCodes[i];
+    if (next === end + 1) {
+      end = next;
+      continue;
+    }
+    ranges.push({ start, end });
+    start = next;
+    end = next;
+  }
+  ranges.push({ start, end });
+
+  const labels = ranges.map((range) => {
+    const startLit = escapeCharForSetLiteral(String.fromCharCode(range.start));
+    const endLit = escapeCharForSetLiteral(String.fromCharCode(range.end));
+    if (range.start === range.end) {
+      return `['${startLit}']`;
+    }
+    return `['${startLit}'-'${endLit}']`;
+  });
+
+  const groupsPerLine = 4;
+  const lines: string[] = [];
+  for (let i = 0; i < labels.length; i += groupsPerLine) {
+    lines.push(labels.slice(i, i + groupsPerLine).join(" "));
+  }
+
+  return lines.join("\n");
+}
+
+function renderEdgeLabel(
+  label: string,
+  x: number,
+  y: number,
+  className: string,
+  textAnchor: "start" | "middle" | "end" = "middle"
+): JSX.Element {
+  const lines = label.split("\n");
+  const maxChars = Math.max(...lines.map((line) => line.length), 1);
+  const lineHeight = 14;
+  const boxWidth = Math.min(300, Math.max(44, maxChars * 7 + 14));
+  const boxHeight = lines.length * lineHeight + 8;
+  const boxX = x - boxWidth / 2;
+  const boxY = y - boxHeight / 2;
+  const textStartY = boxY + 14;
+
+  return (
+    <g className="graph-edge-label-group">
+      <rect x={boxX} y={boxY} width={boxWidth} height={boxHeight} rx={4} className="graph-edge-label-box" />
+      <text x={x} y={textStartY} className={className} textAnchor={textAnchor}>
+        {lines.map((line, index) => (
+          <tspan key={`${line}-${index}`} x={x} dy={index === 0 ? "0" : `${lineHeight}px`}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+}
+
 function buildSingleAutomatonPanel(
   source: Record<string, unknown>,
   title: string,
-  includeDfaAcceptMetadata = false
+  includeDfaAcceptMetadata = false,
+  dfaEdgeLabelMode: DfaEdgeLabelMode = "ranges"
 ): GraphPanel | null {
   const stateSet = new Set<string>();
   const nodes: GraphNode[] = [];
@@ -175,6 +352,16 @@ function buildSingleAutomatonPanel(
     });
   }
 
+  const edgeBuckets = new Map<
+    string,
+    {
+      from: string;
+      to: string;
+      chars: string[];
+      misc: string[];
+    }
+  >();
+
   for (const transitionItem of asArray(source.transitions)) {
     const transitionObj = asObject(transitionItem);
     if (!transitionObj) continue;
@@ -183,12 +370,34 @@ function buildSingleAutomatonPanel(
     const to = asNumber(transitionObj.to);
     if (from === null || to === null) continue;
 
-    stateSet.add(String(from));
-    stateSet.add(String(to));
+    const fromId = String(from);
+    const toId = String(to);
+    stateSet.add(fromId);
+    stateSet.add(toId);
+
+    const key = `${fromId}->${toId}`;
+    const bucket = edgeBuckets.get(key) ?? { from: fromId, to: toId, chars: [], misc: [] };
+    const asChar = asString(transitionObj.char);
+    if (asChar && asChar.length === 1) {
+      bucket.chars.push(asChar);
+    } else {
+      bucket.misc.push(transitionLabel(transitionObj));
+    }
+    edgeBuckets.set(key, bucket);
+  }
+
+  for (const bucket of edgeBuckets.values()) {
+    const parts: string[] = [];
+    if (bucket.chars.length > 0) {
+      parts.push(formatCharSetLabel(bucket.chars, dfaEdgeLabelMode));
+    }
+    if (bucket.misc.length > 0) {
+      parts.push(Array.from(new Set(bucket.misc)).join(", "));
+    }
     edges.push({
-      from: String(from),
-      to: String(to),
-      label: transitionLabel(transitionObj),
+      from: bucket.from,
+      to: bucket.to,
+      label: parts.join(" "),
     });
   }
 
@@ -206,6 +415,11 @@ function buildSingleAutomatonPanel(
   }
 
   nodes.sort((a, b) => Number(a.id) - Number(b.id));
+  edges.sort((a, b) => {
+    const fromDiff = Number(a.from) - Number(b.from);
+    if (fromDiff !== 0) return fromDiff;
+    return Number(a.to) - Number(b.to);
+  });
   if (nodes.length === 0) {
     return null;
   }
@@ -213,13 +427,17 @@ function buildSingleAutomatonPanel(
   return { title, nodes, edges };
 }
 
-function buildAutomatonPanels(action: YalexAction, payload: unknown): GraphPanel[] {
+function buildAutomatonPanels(
+  action: YalexAction,
+  payload: unknown,
+  dfaEdgeLabelMode: DfaEdgeLabelMode
+): GraphPanel[] {
   const root = asObject(payload);
   if (!root) return [];
 
   if (action === "dfa") {
     const dfa = asObject(root.dfa);
-    const panel = dfa ? buildSingleAutomatonPanel(dfa, "DFA", true) : null;
+    const panel = dfa ? buildSingleAutomatonPanel(dfa, "DFA", true, dfaEdgeLabelMode) : null;
     return panel ? [panel] : [];
   }
 
@@ -362,6 +580,7 @@ function registerEditorTheme(monaco: Monaco) {
 }
 
 export function App() {
+  const workbenchSplitRef = useRef<HTMLDivElement | null>(null);
   const restoredSizes = useMemo(
     () =>
       parseSavedSizes(
@@ -388,6 +607,9 @@ export function App() {
   const [resultViewMode, setResultViewMode] = useState<"json" | "graph" | "code">("graph");
   const [generatedPythonCode, setGeneratedPythonCode] = useState<string>("");
   const [isLoadingGeneratedCode, setIsLoadingGeneratedCode] = useState<boolean>(false);
+  const [dfaEdgeLabelMode, setDfaEdgeLabelMode] = useState<DfaEdgeLabelMode>("ranges");
+  const [dfaLabelDensity, setDfaLabelDensity] = useState<DfaLabelDensity>("compact");
+  const [hoveredEdgeKey, setHoveredEdgeKey] = useState<string | null>(null);
   const [validationChecks, setValidationChecks] = useState<ValidationCheck[]>([]);
   const [validationRunAt, setValidationRunAt] = useState<string>("");
 
@@ -712,6 +934,9 @@ export function App() {
       });
     });
 
+    const edgeKeySet = new Set(panel.edges.map((edge) => `${edge.from}->${edge.to}`));
+    const edgeLabels: Array<{ key: string; x: number; y: number; label: string }> = [];
+
     return (
       <section key={panel.title} className="graph-panel">
         <h4>{panel.title}</h4>
@@ -724,24 +949,87 @@ export function App() {
             </defs>
 
             {panel.edges.map((edge, index) => {
+              const edgeKey = `${edge.from}-${edge.to}-${index}`;
               const from = positions.get(edge.from);
               const to = positions.get(edge.to);
               if (!from || !to) return null;
-              const mx = (from.x + to.x) / 2;
-              const my = (from.y + to.y) / 2;
+
+              if (edge.from === edge.to) {
+                const loopRadius = nodeRadius + 14;
+                const startX = from.x + nodeRadius * 0.7;
+                const startY = from.y - nodeRadius * 0.7;
+                const endX = from.x - nodeRadius * 0.7;
+                const endY = from.y - nodeRadius * 0.7;
+                const c1x = from.x + loopRadius;
+                const c1y = from.y - loopRadius - 24;
+                const c2x = from.x - loopRadius;
+                const c2y = from.y - loopRadius - 24;
+                const labelX = from.x;
+                const labelY = from.y - loopRadius - 28;
+
+                edgeLabels.push({ key: edgeKey, x: labelX, y: labelY, label: edge.label });
+
+                return (
+                  <g key={edgeKey} className="graph-edge-group">
+                    <path
+                      d={`M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`}
+                      className={`graph-edge ${hoveredEdgeKey === edgeKey ? "is-hovered" : ""}`}
+                      markerEnd={`url(#${markerId})`}
+                      fill="none"
+                      onMouseEnter={() => setHoveredEdgeKey(edgeKey)}
+                      onMouseLeave={() =>
+                        setHoveredEdgeKey((prev) => (prev === edgeKey ? null : prev))
+                      }
+                    />
+                  </g>
+                );
+              }
+
+              const dx = to.x - from.x;
+              const dy = to.y - from.y;
+              const distance = Math.hypot(dx, dy);
+              if (distance < 0.001) {
+                return null;
+              }
+
+              const ux = dx / distance;
+              const uy = dy / distance;
+              const edgePadding = 2;
+              const startX = from.x + ux * (nodeRadius + edgePadding);
+              const startY = from.y + uy * (nodeRadius + edgePadding);
+              const endX = to.x - ux * (nodeRadius + edgePadding);
+              const endY = to.y - uy * (nodeRadius + edgePadding);
+
+              const reverseExists = edgeKeySet.has(`${edge.to}->${edge.from}`);
+              const directionBias = Number(edge.from) <= Number(edge.to) ? 1 : -1;
+              const curveOffset = reverseExists ? 18 * directionBias : 0;
+              const nx = -uy;
+              const ny = ux;
+              const controlX = (startX + endX) / 2 + nx * curveOffset;
+              const controlY = (startY + endY) / 2 + ny * curveOffset;
+
+              const isCurved = curveOffset !== 0;
+              const pathD = isCurved
+                ? `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`
+                : `M ${startX} ${startY} L ${endX} ${endY}`;
+
+              const labelX = isCurved ? (startX + 2 * controlX + endX) / 4 : (startX + endX) / 2;
+              const labelY = (isCurved ? (startY + 2 * controlY + endY) / 4 : (startY + endY) / 2) - 6;
+
+              edgeLabels.push({ key: edgeKey, x: labelX, y: labelY, label: edge.label });
+
               return (
-                <g key={`${edge.from}-${edge.to}-${index}`}>
-                  <line
-                    x1={from.x}
-                    y1={from.y}
-                    x2={to.x}
-                    y2={to.y}
-                    className="graph-edge"
+                <g key={edgeKey} className="graph-edge-group">
+                  <path
+                    d={pathD}
+                    className={`graph-edge ${hoveredEdgeKey === edgeKey ? "is-hovered" : ""}`}
                     markerEnd={`url(#${markerId})`}
+                    fill="none"
+                    onMouseEnter={() => setHoveredEdgeKey(edgeKey)}
+                    onMouseLeave={() =>
+                      setHoveredEdgeKey((prev) => (prev === edgeKey ? null : prev))
+                    }
                   />
-                  <text x={mx} y={my - 4} className="graph-edge-label">
-                    {edge.label}
-                  </text>
                 </g>
               );
             })}
@@ -764,6 +1052,21 @@ export function App() {
                 </g>
               );
             })}
+
+            {edgeLabels.map((edgeLabel) => {
+              const visible =
+                dfaLabelDensity === "detailed" ||
+                (dfaLabelDensity === "compact" && hoveredEdgeKey === edgeLabel.key);
+              if (!visible) {
+                return null;
+              }
+
+              return (
+                <g key={`label-${edgeLabel.key}`}>
+                  {renderEdgeLabel(edgeLabel.label, edgeLabel.x, edgeLabel.y, "graph-edge-label", "middle")}
+                </g>
+              );
+            })}
           </svg>
         </div>
       </section>
@@ -780,7 +1083,7 @@ export function App() {
     }
 
     if (activeResultAction === "dfa") {
-      const panels = buildAutomatonPanels(activeResultAction, activeResultObject);
+      const panels = buildAutomatonPanels(activeResultAction, activeResultObject, dfaEdgeLabelMode);
       if (panels.length === 0) {
         return <div className="graph-empty">No hay estructura de autómata para renderizar.</div>;
       }
@@ -1249,7 +1552,19 @@ export function App() {
       }
 
       if (activeResize.target === "rightPanel") {
-        const nextWidth = Math.min(560, Math.max(260, activeResize.startRightPanelWidth - dx));
+        const hostWidth = workbenchSplitRef.current?.clientWidth ?? window.innerWidth;
+        const minRightPanelWidth = 260;
+        const minEditorWidth = 320;
+        const splitterWidth = 6;
+        const maxRightPanelWidth = Math.max(
+          minRightPanelWidth,
+          hostWidth - splitterWidth - minEditorWidth
+        );
+        const nextWidth = clamp(
+          activeResize.startRightPanelWidth - dx,
+          minRightPanelWidth,
+          maxRightPanelWidth
+        );
         setRightPanelWidth(nextWidth);
         return;
       }
@@ -1476,6 +1791,7 @@ export function App() {
 
           <div
             className="workbench-split"
+            ref={workbenchSplitRef}
             style={{ gridTemplateColumns: `1fr 6px ${rightPanelWidth}px` }}
           >
             <div className="editor-shell">
@@ -1664,6 +1980,38 @@ export function App() {
                 >
                   Código Python
                 </button>
+                {resultViewMode === "graph" && activeResultAction === "dfa" && (
+                  <>
+                    <button
+                      type="button"
+                      className={`result-view-btn ${dfaLabelDensity === "compact" ? "active" : ""}`}
+                      onClick={() => setDfaLabelDensity("compact")}
+                    >
+                      Compacto
+                    </button>
+                    <button
+                      type="button"
+                      className={`result-view-btn ${dfaLabelDensity === "detailed" ? "active" : ""}`}
+                      onClick={() => setDfaLabelDensity("detailed")}
+                    >
+                      Detallado
+                    </button>
+                    <button
+                      type="button"
+                      className={`result-view-btn ${dfaEdgeLabelMode === "ranges" ? "active" : ""}`}
+                      onClick={() => setDfaEdgeLabelMode("ranges")}
+                    >
+                      Rangos
+                    </button>
+                    <button
+                      type="button"
+                      className={`result-view-btn ${dfaEdgeLabelMode === "aliases" ? "active" : ""}`}
+                      onClick={() => setDfaEdgeLabelMode("aliases")}
+                    >
+                      Alias
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             {resultViewMode === "graph" && canRenderGraph ? (

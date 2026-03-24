@@ -8,6 +8,10 @@
   --muted: #9da2a6;
   --accent: #0e639c;
   --accent-soft: #1177bb;
+  --scrollbar-track: #1f1f22;
+  --scrollbar-thumb: #3d4b5f;
+  --scrollbar-thumb-hover: #4f6380;
+  --scrollbar-thumb-active: #5a7296;
   --ok: #73c991;
   --error: #f48771;
   --info: #d7ba7d;
@@ -26,6 +30,38 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 10px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
 }
 
 button,
@@ -315,6 +351,8 @@ button {
 }
 
 .editor-shell {
+  min-width: 0;
+  min-height: 0;
   width: 100%;
   height: 100%;
   background: #1e1e1e;
@@ -339,6 +377,7 @@ button {
 }
 
 .command-panel {
+  min-width: 0;
   min-height: 0;
   background: #252526;
   display: flex;
@@ -649,16 +688,29 @@ button {
 .graph-edge {
   stroke: #90a8d5;
   stroke-width: 1.4;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+}
+
+.graph-edge.is-hovered {
+  stroke: #d2e4ff;
+  stroke-width: 2;
+}
+
+.graph-edge-label-group {
+  pointer-events: none;
+}
+
+.graph-edge-label-box {
+  fill: rgba(10, 16, 28, 0.88);
+  stroke: #6f8ec6;
+  stroke-width: 1;
 }
 
 .graph-edge-label {
   fill: #d5e4ff;
   font-size: 11px;
-  paint-order: stroke;
-  stroke: #121826;
-  stroke-width: 3px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  font-family: "Consolas", "Cascadia Code", monospace;
+  font-weight: 500;
 }
 
 .graph-node {
