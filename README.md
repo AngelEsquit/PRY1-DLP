@@ -113,8 +113,8 @@ La app en desktop-app ofrece una experiencia tipo VS Code, enfocada en flujo YAL
 
 - Explorer recursivo.
 - Editor en pestañas con resaltado de sintaxis (Monaco Editor).
-- Panel lateral de ejecución con una acción activa por vez (`spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`).
-- En método directo, `nfa` reporta etapa omitida y `combinedNfa` muestra artefactos `followpos`.
+- Panel lateral de ejecución con una acción activa por vez (`spec`, `ast`, `combinedNfa`, `dfa`, `tokenize`, `generate`).
+- En método directo, `combinedNfa` muestra artefactos `followpos` y posiciones del algoritmo.
 - Campos contextuales por acción (solo se muestran los necesarios).
 - Panel de resultados JSON y panel de output para trazas y errores.
 - Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia de tamaños al reabrir.

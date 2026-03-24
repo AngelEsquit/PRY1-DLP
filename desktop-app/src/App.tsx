@@ -35,11 +35,10 @@ type OutputItem = {
 const YAL_ACTIONS: Array<{ id: YalexAction; label: string }> = [
   { id: "spec", label: "Spec (JSON)" },
   { id: "ast", label: "AST" },
-  { id: "nfa", label: "NFA (omitido)" },
-  { id: "combinedNfa", label: "Direct Construction" },
+  { id: "combinedNfa", label: "Construcción Directa" },
   { id: "dfa", label: "DFA" },
-  { id: "tokenize", label: "Tokenize" },
-  { id: "generate", label: "Generate Lexer" },
+  { id: "tokenize", label: "Tokenizar" },
+  { id: "generate", label: "Generar Lexer" },
 ];
 
 const FULL_PIPELINE_ACTIONS: YalexAction[] = YAL_ACTIONS.map((action) => action.id);
@@ -51,7 +50,7 @@ function getActionLabel(action: YalexAction): string {
 const ACTION_HELP: Record<YalexAction, string> = {
   spec: "Extrae la especificación parseada en JSON.",
   ast: "Construye y muestra el árbol sintáctico de regex.",
-  nfa: "En método directo no se construye AFN (etapa omitida).",
+  nfa: "Etapa legacy no utilizada en la UI del método directo.",
   combinedNfa: "Muestra artefactos del método directo (followpos/posiciones).",
   dfa: "Construye y minimiza el AFD final.",
   tokenize: "Tokeniza una entrada por archivo o texto directo.",
@@ -396,7 +395,9 @@ export function App() {
     Partial<Record<YalexAction, unknown>>
   >({});
   const [activeResultAction, setActiveResultAction] = useState<YalexAction | null>(null);
-  const [resultViewMode, setResultViewMode] = useState<"json" | "graph">("graph");
+  const [resultViewMode, setResultViewMode] = useState<"json" | "graph" | "code">("graph");
+  const [generatedPythonCode, setGeneratedPythonCode] = useState<string>("");
+  const [isLoadingGeneratedCode, setIsLoadingGeneratedCode] = useState<boolean>(false);
   const [validationChecks, setValidationChecks] = useState<ValidationCheck[]>([]);
   const [validationRunAt, setValidationRunAt] = useState<string>("");
 
@@ -455,9 +456,80 @@ export function App() {
   const canRenderGraph = Boolean(
     activeResultAction && graphSupportedActions.includes(activeResultAction) && activeResultObject
   );
+  const generateRoot = activeResultAction === "generate" ? asObject(activeResultObject) : null;
+  const generatedOutputPath = generateRoot ? asString(generateRoot.outputPath) : null;
+  const generatedCodePathCandidates = useMemo(() => {
+    if (activeResultAction !== "generate") {
+      return [] as string[];
+    }
+
+    const candidates: string[] = [];
+    if (generatedOutputPath?.trim()) {
+      candidates.push(generatedOutputPath.trim());
+    }
+    if (generateOutputPath.trim()) {
+      candidates.push(generateOutputPath.trim());
+    }
+
+    const sourcePath = generatedOutputPath?.trim() || generateOutputPath.trim();
+    const baseName = sourcePath ? getPathBaseName(sourcePath) : "";
+    if (workspaceRoot && baseName) {
+      candidates.push(joinPath(workspaceRoot, "output", baseName));
+      candidates.push(joinPath(workspaceRoot, baseName));
+    }
+
+    return Array.from(new Set(candidates.filter(Boolean)));
+  }, [activeResultAction, generatedOutputPath, generateOutputPath, workspaceRoot]);
+  const canRenderCode = generatedCodePathCandidates.length > 0;
 
   const passedChecks = validationChecks.filter((check) => check.ok).length;
   const totalChecks = validationChecks.length;
+
+  useEffect(() => {
+    if (resultViewMode !== "code") {
+      return;
+    }
+
+    if (!canRenderCode) {
+      setGeneratedPythonCode("");
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingGeneratedCode(true);
+
+    const loadGeneratedCode = async () => {
+      let lastError: unknown = null;
+      for (const candidatePath of generatedCodePathCandidates) {
+        try {
+          const content = await readTextFile(candidatePath);
+          if (!cancelled) {
+            setGeneratedPythonCode(content);
+          }
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!cancelled) {
+        const attempted = generatedCodePathCandidates.join(" | ");
+        setGeneratedPythonCode(
+          `No se pudo leer el lexer generado. Rutas intentadas: ${attempted}. Error: ${String(lastError)}`
+        );
+      }
+    };
+
+    void loadGeneratedCode().finally(() => {
+      if (!cancelled) {
+        setIsLoadingGeneratedCode(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resultViewMode, canRenderCode, generatedCodePathCandidates]);
 
   function buildValidationChecks(
     results: Partial<Record<YalexAction, unknown>>
@@ -467,9 +539,6 @@ export function App() {
 
     const astRoot = asObject(results.ast);
     const regexAst = astRoot ? asObject(astRoot.regex_ast) : null;
-
-    const nfaRoot = asObject(results.nfa);
-    const directMethod = nfaRoot ? asObject(nfaRoot.direct_method) : null;
 
     const combinedRoot = asObject(results.combinedNfa);
     const directConstruction = combinedRoot ? asObject(combinedRoot.direct_construction) : null;
@@ -496,20 +565,12 @@ export function App() {
           : "Sin resultado de ast",
       },
       {
-        id: "nfa",
-        label: "NFA",
-        ok: Boolean(directMethod && asString(directMethod.omitted_stage) === "thompson_nfa"),
-        detail: directMethod
-          ? asString(directMethod.message) ?? "Etapa omitida"
-          : "Sin resultado de nfa",
-      },
-      {
         id: "combinedNfa",
-        label: "Direct Construction",
+        label: "Construcción Directa",
         ok: Boolean(directConstruction && asObject(directConstruction.followpos)),
         detail: directConstruction
           ? `followpos=${Object.keys(asObject(directConstruction.followpos) ?? {}).length}, alphabet=${asNumber(directConstruction.alphabet_size) ?? 0}`
-          : "Sin resultado de combinedNfa",
+          : "Sin resultado de construcción directa",
       },
       {
         id: "dfa",
@@ -958,35 +1019,8 @@ export function App() {
     setActionResults((prev) => ({ ...prev, [action]: formatted }));
     setActionResultObjects((prev) => ({ ...prev, [action]: parsed.result }));
     setActiveResultAction(action);
-    pushOutput("ok", `${action} finalizado correctamente.`);
+    pushOutput("ok", `${getActionLabel(action)} finalizado correctamente.`);
     return true;
-  }
-
-  async function runAction(action: YalexAction) {
-    if (!workspaceRoot) {
-      pushOutput("error", "No hay workspace abierto.");
-      return;
-    }
-
-    if (!yalFilePath && !activeTab?.name.endsWith(".yal")) {
-      pushOutput("error", "Seleccione o abra un archivo .yal antes de ejecutar acciones.");
-      return;
-    }
-
-    const yalSource = activeTab?.name.endsWith(".yal") ? activeTab.content : undefined;
-    const yalPath = yalSource ? undefined : yalFilePath;
-
-    try {
-      setIsRunningAction(true);
-      setValidationChecks([]);
-      setValidationRunAt("");
-      pushOutput("info", `Ejecutando acción: ${action}`);
-      await executeAction(action, yalPath, yalSource);
-    } catch (error) {
-      pushOutput("error", `Fallo al ejecutar ${action}: ${String(error)}`);
-    } finally {
-      setIsRunningAction(false);
-    }
   }
 
   async function runFullPipeline(): Promise<boolean> {
@@ -1014,12 +1048,12 @@ export function App() {
         setSelectedAction(nextAction);
         pushOutput(
           "info",
-          `Paso ${index + 1}/${FULL_PIPELINE_ACTIONS.length}: ejecutando ${nextAction}`
+          `Paso ${index + 1}/${FULL_PIPELINE_ACTIONS.length}: ejecutando ${getActionLabel(nextAction)}`
         );
 
         const ok = await executeAction(nextAction, yalPath, yalSource);
         if (!ok) {
-          pushOutput("error", `Pipeline detenido en '${nextAction}'.`);
+          pushOutput("error", `Pipeline detenido en '${getActionLabel(nextAction)}'.`);
           return false;
         }
       }
@@ -1032,15 +1066,6 @@ export function App() {
     } finally {
       setIsRunningAction(false);
     }
-  }
-
-  async function runFullPipelineAndValidate() {
-    const ok = await runFullPipeline();
-    if (!ok) {
-      runValidationFromCurrentResults();
-      return;
-    }
-    runValidationFromCurrentResults();
   }
 
   function renderTree(path: string, depth: number) {
@@ -1320,9 +1345,6 @@ export function App() {
             />
             Guardar
           </button>
-          <button onClick={() => void runAction(selectedAction)} disabled={isRunningAction}>
-            {isRunningAction ? "Ejecutando..." : `Ejecutar ${selectedAction}`}
-          </button>
         </div>
       </header>
 
@@ -1561,27 +1583,11 @@ export function App() {
               )}
 
               <button
-                className="run-action-btn"
-                onClick={() => void runAction(selectedAction)}
-                disabled={isRunningAction}
-              >
-                {isRunningAction ? "Ejecutando..." : "Ejecutar acción"}
-              </button>
-
-              <button
                 className="run-all-btn"
                 onClick={() => void runFullPipeline()}
                 disabled={isRunningAction}
               >
                 {isRunningAction ? "Pipeline en ejecución..." : "Ejecutar todo (secuencial)"}
-              </button>
-
-              <button
-                className="run-validate-btn"
-                onClick={() => void runFullPipelineAndValidate()}
-                disabled={isRunningAction}
-              >
-                {isRunningAction ? "Validando..." : "Ejecutar todo + validar"}
               </button>
 
               <button
@@ -1669,10 +1675,22 @@ export function App() {
                 >
                   Gráfico
                 </button>
+                <button
+                  type="button"
+                  className={`result-view-btn ${resultViewMode === "code" ? "active" : ""}`}
+                  onClick={() => setResultViewMode("code")}
+                  disabled={!canRenderCode}
+                >
+                  Código Python
+                </button>
               </div>
             </div>
             {resultViewMode === "graph" && canRenderGraph ? (
               <div className="result-graph-view">{renderGraphView()}</div>
+            ) : resultViewMode === "code" && canRenderCode ? (
+              <pre className="result-view">
+                {isLoadingGeneratedCode ? "Cargando código generado..." : generatedPythonCode}
+              </pre>
             ) : (
               <pre className="result-view">{activeResultText}</pre>
             )}

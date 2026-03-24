@@ -30,11 +30,24 @@ if (alreadyRunning) {
   process.exit(0);
 }
 
-const cmd = process.platform === "win32" ? "npm.cmd" : "npm";
-const child = spawn(cmd, ["run", "dev"], {
-  stdio: "inherit",
-  shell: false,
-  env: process.env,
+const child = process.platform === "win32"
+  ? spawn("cmd.exe", ["/d", "/s", "/c", "npm run dev"], {
+      stdio: "inherit",
+      shell: false,
+      cwd: process.cwd(),
+      env: { ...process.env },
+      windowsHide: false,
+    })
+  : spawn("npm", ["run", "dev"], {
+      stdio: "inherit",
+      shell: false,
+      cwd: process.cwd(),
+      env: { ...process.env },
+    });
+
+child.on("error", (error) => {
+  console.error(`[tauri] No se pudo iniciar Vite: ${error.message}`);
+  process.exit(1);
 });
 
 child.on("exit", (code) => {
