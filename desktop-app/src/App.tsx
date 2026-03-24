@@ -47,16 +47,6 @@ function getActionLabel(action: YalexAction): string {
   return YAL_ACTIONS.find((item) => item.id === action)?.label ?? action;
 }
 
-const ACTION_HELP: Record<YalexAction, string> = {
-  spec: "Extrae la especificación parseada en JSON.",
-  ast: "Construye y muestra el árbol sintáctico de regex.",
-  nfa: "Etapa legacy no utilizada en la UI del método directo.",
-  combinedNfa: "Muestra artefactos del método directo (followpos/posiciones).",
-  dfa: "Construye y minimiza el AFD final.",
-  tokenize: "Tokeniza una entrada por archivo o texto directo.",
-  generate: "Genera un lexer Python autónomo.",
-};
-
 const PANEL_STORAGE_KEY = "yalex-studio.panel-sizes.v1";
 
 type PanelSizes = {
@@ -404,9 +394,6 @@ export function App() {
   const [yalFilePath, setYalFilePath] = useState<string>("");
   const [inputFilePath, setInputFilePath] = useState<string>("");
   const [generateOutputPath, setGenerateOutputPath] = useState<string>("");
-  const [tokenizeMode, setTokenizeMode] = useState<"path" | "text">("path");
-  const [tokenizeText, setTokenizeText] = useState<string>("a a a\n");
-  const [selectedAction, setSelectedAction] = useState<YalexAction>("spec");
   const [isRunningAction, setIsRunningAction] = useState<boolean>(false);
   const [isInitializing, setIsInitializing] = useState<boolean>(true); // Show loading state while Tauri initializes
   const [initError, setInitError] = useState<string>(""); // Track initialization errors
@@ -907,6 +894,9 @@ export function App() {
       if (name.endsWith(".yal")) {
         setYalFilePath(path);
       }
+      if (name.endsWith(".txt")) {
+        setInputFilePath(path);
+      }
       pushOutput("ok", `Archivo abierto: ${name}`);
       setIsRunningAction(false);
     } catch (error) {
@@ -969,8 +959,7 @@ export function App() {
       action,
       yalPath,
       yalSource,
-      inputPath: action === "tokenize" && tokenizeMode === "path" ? inputFilePath : undefined,
-      inputText: action === "tokenize" && tokenizeMode === "text" ? tokenizeText : undefined,
+      inputPath: action === "tokenize" ? inputFilePath : undefined,
       outputPath: action === "generate" ? generateOutputPath : undefined,
       includeTrace: action === "tokenize",
       traceLimit: 200,
@@ -997,13 +986,18 @@ export function App() {
       return false;
     }
 
-    if (!yalFilePath && !activeTab?.name.endsWith(".yal")) {
-      pushOutput("error", "Seleccione o abra un archivo .yal antes de ejecutar acciones.");
+    if (!yalFilePath.trim()) {
+      pushOutput("error", "Debe ingresar la ruta del archivo .yal.");
       return false;
     }
 
-    const yalSource = activeTab?.name.endsWith(".yal") ? activeTab.content : undefined;
-    const yalPath = yalSource ? undefined : yalFilePath;
+    if (!inputFilePath.trim()) {
+      pushOutput("error", "Debe ingresar la ruta del archivo .txt de entrada.");
+      return false;
+    }
+
+    const yalSource = undefined;
+    const yalPath = yalFilePath;
 
     try {
       setIsRunningAction(true);
@@ -1013,7 +1007,6 @@ export function App() {
 
       for (let index = 0; index < FULL_PIPELINE_ACTIONS.length; index++) {
         const nextAction = FULL_PIPELINE_ACTIONS[index];
-        setSelectedAction(nextAction);
         pushOutput(
           "info",
           `Paso ${index + 1}/${FULL_PIPELINE_ACTIONS.length}: ejecutando ${getActionLabel(nextAction)}`
@@ -1155,8 +1148,8 @@ export function App() {
         const root = await getWorkspaceRoot();
         console.log("[Bootstrap] Got workspace root:", root);
 
-        setYalFilePath(joinPath(root, "examples", "simple.yal"));
-        setInputFilePath(joinPath(root, "tests", "input", "low.txt"));
+        setYalFilePath("");
+        setInputFilePath("");
         setGenerateOutputPath(joinPath(root, "output", "lexer_generated_tauri.py"));
 
         console.log("[Bootstrap] Opening workspace root...");
@@ -1478,19 +1471,6 @@ export function App() {
 
             <aside className="command-panel">
               <div className="panel-title panel-title-tight">Pipeline</div>
-              <label className="field">
-                Acción
-                <select
-                  value={selectedAction}
-                  onChange={(event) => setSelectedAction(event.target.value as YalexAction)}
-                >
-                  {YAL_ACTIONS.map((action) => (
-                    <option key={action.id} value={action.id}>
-                      {action.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
 
               <label className="field">
                 Archivo .yal
@@ -1501,61 +1481,30 @@ export function App() {
                 />
               </label>
 
-              {selectedAction === "tokenize" && (
-                <>
-                  <label className="field">
-                    Modo tokenización
-                    <select
-                      value={tokenizeMode}
-                      onChange={(event) =>
-                        setTokenizeMode(event.target.value as "path" | "text")
-                      }
-                    >
-                      <option value="path">Archivo</option>
-                      <option value="text">Texto directo</option>
-                    </select>
-                  </label>
+              <label className="field">
+                Input (.txt)
+                <input
+                  value={inputFilePath}
+                  onChange={(event) => setInputFilePath(event.target.value)}
+                  placeholder="Ruta del texto de entrada"
+                />
+              </label>
 
-                  {tokenizeMode === "path" ? (
-                    <label className="field">
-                      Input (archivo)
-                      <input
-                        value={inputFilePath}
-                        onChange={(event) => setInputFilePath(event.target.value)}
-                        placeholder="Ruta del texto de entrada"
-                      />
-                    </label>
-                  ) : (
-                    <label className="field">
-                      Input (texto)
-                      <textarea
-                        className="inline-textarea"
-                        value={tokenizeText}
-                        onChange={(event) => setTokenizeText(event.target.value)}
-                        placeholder="Texto a tokenizar"
-                      />
-                    </label>
-                  )}
-                </>
-              )}
-
-              {selectedAction === "generate" && (
-                <label className="field">
-                  Output lexer
-                  <input
-                    value={generateOutputPath}
-                    onChange={(event) => setGenerateOutputPath(event.target.value)}
-                    placeholder="Ruta del lexer generado"
-                  />
-                </label>
-              )}
+              <label className="field">
+                Output lexer
+                <input
+                  value={generateOutputPath}
+                  onChange={(event) => setGenerateOutputPath(event.target.value)}
+                  placeholder="Ruta del lexer generado"
+                />
+              </label>
 
               <button
                 className="run-all-btn"
                 onClick={() => void runFullPipeline()}
                 disabled={isRunningAction}
               >
-                {isRunningAction ? "Pipeline en ejecución..." : "Ejecutar todo (secuencial)"}
+                {isRunningAction ? "Ejecutando..." : "Ejecutar"}
               </button>
 
               <button
@@ -1583,7 +1532,10 @@ export function App() {
                 </section>
               )}
 
-              <p className="command-hint">{ACTION_HELP[selectedAction]}</p>
+              <p className="command-hint">
+                Ejecuta secuencialmente: Spec → AST → Construcción Directa → DFA → Tokenizar →
+                Generar Lexer.
+              </p>
             </aside>
           </div>
 
