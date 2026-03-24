@@ -7,16 +7,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from yalex_parser import (
-    build_combined_nfa,
-    build_thompson_nfa,
-    combined_nfa_to_dict,
-    nfa_to_dict,
+    build_direct_artifacts,
+    direct_artifacts_to_dict,
     parse_regex,
     parse_yalex,
     regex_node_to_dict,
 )
 from yalex_parser.codegen import generate_lexer
-from yalex_parser.dfa import dfa_to_dict, dfa_to_table, minimize_dfa, nfa_to_dfa
+from yalex_parser.dfa import dfa_to_dict, dfa_to_table, minimize_dfa
 from yalex_parser.error_format import render_user_error
 from yalex_parser.simulator import tokenize_with_trace
 
@@ -32,10 +30,10 @@ def _build_pipeline(yal_path: Path):
             label = alternative.action.strip() if alternative.action else f"ALT_{index}"
             combined_entries.append((label, parse_regex(alternative.regex)))
 
-    combined = build_combined_nfa(combined_entries, let_asts)
-    raw_dfa = nfa_to_dfa(combined)
+    direct = build_direct_artifacts(combined_entries, let_asts)
+    raw_dfa = direct.dfa
     dfa = minimize_dfa(raw_dfa)
-    return spec, let_asts, combined_entries, combined, dfa
+    return spec, direct, dfa
 
 
 def _print_tokenization(tokens, errors, input_path: Path) -> None:
@@ -98,8 +96,8 @@ def _cli_menu() -> None:
         print("1) Seleccionar archivo .yal")
         print("2) Ver JSON de especificación")
         print("3) Ver AST de regex")
-        print("4) Ver AFN (Thompson)")
-        print("5) Ver AFN combinado")
+        print("4) Ver etapa omitida (AFN Thompson)")
+        print("5) Ver construcción directa (followpos)")
         print("6) Ver AFD minimizado")
         print("7) Tokenizar archivo de texto")
         print("8) Generar lexer autónomo")
@@ -128,7 +126,7 @@ def _cli_menu() -> None:
                 print("Primero seleccione un archivo .yal (opción 1).")
                 continue
 
-            spec, let_asts, combined_entries, combined, dfa = _build_pipeline(yal_path)
+            spec, direct, dfa = _build_pipeline(yal_path)
 
             if op == "2":
                 print(json.dumps({"spec": asdict(spec)}, indent=2, ensure_ascii=False))
@@ -154,28 +152,29 @@ def _cli_menu() -> None:
                 print(json.dumps({"regex_ast": {"lets": lets_ast, "rule_alternatives": rule_alternatives_ast}}, indent=2, ensure_ascii=False))
 
             elif op == "4":
-                lets_nfa = [
-                    {
-                        "name": definition.name,
-                        "nfa": nfa_to_dict(build_thompson_nfa(let_asts[definition.name], let_asts)),
-                    }
-                    for definition in spec.lets
-                ]
-                rule_alternatives_nfa = []
-                if spec.rule is not None:
-                    for index, alternative in enumerate(spec.rule.alternatives):
-                        alt_ast = parse_regex(alternative.regex)
-                        rule_alternatives_nfa.append(
-                            {
-                                "index": index,
-                                "regex": alternative.regex,
-                                "nfa": nfa_to_dict(build_thompson_nfa(alt_ast, let_asts)),
+                print(
+                    json.dumps(
+                        {
+                            "direct_method": {
+                                "message": "No se genera AFN en el método directo.",
+                                "omitted_stage": "thompson_nfa",
                             }
-                        )
-                print(json.dumps({"thompson_nfa": {"lets": lets_nfa, "rule_alternatives": rule_alternatives_nfa}}, indent=2, ensure_ascii=False))
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
 
             elif op == "5":
-                print(json.dumps({"combined_nfa": combined_nfa_to_dict(combined)}, indent=2, ensure_ascii=False))
+                print(
+                    json.dumps(
+                        {
+                            "direct_construction": direct_artifacts_to_dict(direct),
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
 
             elif op == "6":
                 payload = {

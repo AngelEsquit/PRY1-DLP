@@ -16,9 +16,9 @@ if str(SRC) not in sys.path:
 
 from yalex_parser import parse_yalex, parse_regex
 from yalex_parser.codegen import generate_lexer
-from yalex_parser.dfa import dfa_to_table, minimize_dfa, nfa_to_dfa
+from yalex_parser.dfa import dfa_to_table, minimize_dfa
+from yalex_parser.direct import build_direct_dfa
 from yalex_parser.simulator import tokenize
-from yalex_parser.thompson import build_combined_nfa
 
 
 class TestYALexPipeline(unittest.TestCase):
@@ -31,8 +31,7 @@ class TestYALexPipeline(unittest.TestCase):
                 label = alternative.action.strip() if alternative.action else f"ALT_{index}"
                 entries.append((label, parse_regex(alternative.regex)))
 
-        combined = build_combined_nfa(entries, let_asts)
-        return minimize_dfa(nfa_to_dfa(combined))
+        return minimize_dfa(build_direct_dfa(entries, let_asts))
 
     def test_low_medium_high_inputs_tokenize_without_errors(self):
         cases = [
@@ -120,8 +119,7 @@ rule tokens =
                 regex = "(" * depth + "'a'" + ")" * depth
                 ast = parse_regex(regex)
 
-                combined = build_combined_nfa([('return "A"', ast)], definitions={})
-                dfa = minimize_dfa(nfa_to_dfa(combined))
+                dfa = minimize_dfa(build_direct_dfa([('return "A"', ast)], definitions={}))
                 tbl = dfa_to_table(dfa)
                 tokens, errors = tokenize("a", tbl["start"], tbl["accept"], tbl["table"])
 
@@ -143,7 +141,7 @@ rule tokens =
             generate_lexer(dfa, spec.header, spec.trailer, output_path=lexer_path)
 
             result = subprocess.run(
-                ["python3", str(lexer_path), str(input_path)],
+                [sys.executable, str(lexer_path), str(input_path)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -165,7 +163,7 @@ rule tokens =
         let_asts = {definition.name: parse_regex(definition.regex) for definition in spec.lets}
 
         with self.assertRaises(ValueError):
-            build_combined_nfa([('return "A"', parse_regex("a"))], let_asts)
+            build_direct_dfa([('return "A"', parse_regex("a"))], let_asts)
 
 
 if __name__ == "__main__":

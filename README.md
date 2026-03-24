@@ -7,7 +7,7 @@ Generador de analizadores léxicos (YALex a lexer en Python), implementado sin l
 El proyecto recibe una especificación YALex y permite:
 
 - Parsear la especificación y sus regex.
-- Construir AFN y AFD minimizado.
+- Construir AFD minimizado con método directo.
 - Tokenizar entradas con estrategia maximal munch.
 - Generar un lexer Python autónomo.
 
@@ -25,7 +25,8 @@ src/
     yalex_parser/
         parser.py              # Parser de .yal
         regex_parser.py        # Parser de regex
-        thompson.py            # Construcción AFN
+        direct.py              # Construcción directa de AFD (followpos)
+        thompson.py            # Construcción AFN (legacy/inspección)
         dfa.py                 # Construcción y minimización AFD
         simulator.py           # Tokenización con traza
         codegen.py             # Generación de lexer Python
@@ -60,12 +61,11 @@ tests/
 
 1. Parser YALex: extrae header, lets, rule y trailer.
 2. Regex a AST: convierte regex de lets y rule en árboles.
-3. Thompson: crea AFN por alternativa.
-4. AFN combinado: unifica alternativas con prioridades.
-5. Subset construction: convierte AFN a AFD.
-6. Minimización: reduce AFD (Hopcroft).
-7. Simulación: tokeniza texto y reporta errores léxicos.
-8. Codegen: genera lexer Python autónomo.
+3. Método directo: calcula nullable/firstpos/lastpos/followpos.
+4. Construcción directa: crea AFD con prioridades de aceptación.
+5. Minimización: reduce AFD (Hopcroft).
+6. Simulación: tokeniza texto y reporta errores léxicos.
+7. Codegen: genera lexer Python autónomo.
 
 ## Ejecución
 
@@ -103,7 +103,7 @@ python output/lexer.py tests/input/medium.txt
 Flujo típico del menú CLI:
 
 1. Seleccionar archivo .yal.
-2. Revisar spec, AST, AFN, AFN combinado o AFD.
+2. Revisar spec, AST, construcción directa o AFD.
 3. Tokenizar entrada.
 4. Generar lexer .py.
 
@@ -113,7 +113,8 @@ La app en desktop-app ofrece una experiencia tipo VS Code, enfocada en flujo YAL
 
 - Explorer recursivo.
 - Editor en pestañas con resaltado de sintaxis (Monaco Editor).
-- Panel lateral de ejecución con una acción activa por vez (`spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`).
+- Panel lateral de ejecución con una acción activa por vez (`spec`, `ast`, `combinedNfa`, `dfa`, `tokenize`, `generate`).
+- En método directo, `combinedNfa` muestra artefactos `followpos` y posiciones del algoritmo.
 - Campos contextuales por acción (solo se muestran los necesarios).
 - Panel de resultados JSON y panel de output para trazas y errores.
 - Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia de tamaños al reabrir.

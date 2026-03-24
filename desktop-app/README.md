@@ -32,7 +32,8 @@ npm run tauri dev
 - Explorer recursivo con expand/collapse.
 - Apertura y edición de archivos de texto en pestañas.
 - Guardado manual del archivo activo.
-- Ejecución del pipeline con una acción activa por vez: `spec`, `ast`, `nfa`, `combinedNfa`, `dfa`, `tokenize`, `generate`.
+- Ejecución del pipeline con una acción activa por vez: `spec`, `ast`, `combinedNfa` (construcción directa), `dfa`, `tokenize`, `generate`.
+- La UI está alineada al método directo: se visualizan artefactos `followpos`/posiciones en la etapa de construcción directa.
 - Campos contextuales por acción (solo se muestran cuando aplican).
 - Panel `Resultado JSON` para respuesta estructurada y panel `Output` para estado/errores.
 - Paneles redimensionables (Explorer, Pipeline, Resultado y Output) con persistencia local de tamaños.

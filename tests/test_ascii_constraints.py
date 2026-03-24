@@ -11,9 +11,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from yalex_parser import parse_regex, parse_yalex
-from yalex_parser.dfa import dfa_to_table, minimize_dfa, nfa_to_dfa
+from yalex_parser.dfa import dfa_to_table, minimize_dfa
+from yalex_parser.direct import build_direct_dfa
 from yalex_parser.simulator import tokenize
-from yalex_parser.thompson import build_combined_nfa
 
 
 def _build_dfa_from_spec(source: str):
@@ -25,8 +25,7 @@ def _build_dfa_from_spec(source: str):
             label = alternative.action.strip() if alternative.action else f"ALT_{index}"
             entries.append((label, parse_regex(alternative.regex)))
 
-    combined = build_combined_nfa(entries, let_asts)
-    return minimize_dfa(nfa_to_dfa(combined))
+    return minimize_dfa(build_direct_dfa(entries, let_asts))
 
 
 class TestASCIIConstraints(unittest.TestCase):

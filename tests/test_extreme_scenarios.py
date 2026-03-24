@@ -14,9 +14,9 @@ if str(SRC) not in sys.path:
 
 from yalex_parser import parse_yalex, parse_regex
 from yalex_parser.codegen import generate_lexer
-from yalex_parser.dfa import dfa_to_table, minimize_dfa, nfa_to_dfa
+from yalex_parser.dfa import dfa_to_table, minimize_dfa
+from yalex_parser.direct import build_direct_dfa
 from yalex_parser.simulator import tokenize
-from yalex_parser.thompson import build_combined_nfa
 
 
 def _build_dfa_from_spec(source: str):
@@ -28,8 +28,7 @@ def _build_dfa_from_spec(source: str):
             label = alternative.action.strip() if alternative.action else f"ALT_{index}"
             entries.append((label, parse_regex(alternative.regex)))
 
-    combined = build_combined_nfa(entries, let_asts)
-    return minimize_dfa(nfa_to_dfa(combined)), spec
+    return minimize_dfa(build_direct_dfa(entries, let_asts)), spec
 
 
 class TestExtremeScenarios(unittest.TestCase):
@@ -38,8 +37,7 @@ class TestExtremeScenarios(unittest.TestCase):
             with self.subTest(depth=depth):
                 regex = "(" * depth + "'x'" + ")" * depth
                 ast = parse_regex(regex)
-                combined = build_combined_nfa([('return "X"', ast)], definitions={})
-                dfa = minimize_dfa(nfa_to_dfa(combined))
+                dfa = minimize_dfa(build_direct_dfa([('return "X"', ast)], definitions={}))
                 tbl = dfa_to_table(dfa)
                 tokens, errors = tokenize("x", tbl["start"], tbl["accept"], tbl["table"])
                 self.assertEqual(errors, [])
