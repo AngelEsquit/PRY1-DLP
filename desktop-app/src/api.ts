@@ -156,6 +156,7 @@ export async function runYalex(payload: {
   includeTrace?: boolean;
   traceLimit?: number;
   outputPath?: string;
+  lexerPath?: string;
 }): Promise<unknown> {
   const { workspaceRoot, ...rest } = payload;
   const raw = await invokeTauri<string>("run_yalex_bridge", {

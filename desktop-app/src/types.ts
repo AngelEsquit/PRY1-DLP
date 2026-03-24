@@ -18,4 +18,5 @@ export type YalexAction =
   | "combinedNfa"
   | "dfa"
   | "tokenize"
-  | "generate";
+  | "generate"
+  | "executeGeneratedLexer";

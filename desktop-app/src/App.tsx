@@ -566,6 +566,67 @@ export function App() {
     }
   }
 
+  async function runGeneratedLexerProgram() {
+    if (!workspaceRoot) {
+      pushOutput("error", "No hay workspace abierto.");
+      return;
+    }
+    if (!generateOutputPath.trim()) {
+      pushOutput("error", "Debe indicar la ruta del lexer generado (.py).");
+      return;
+    }
+    if (!inputFilePath.trim()) {
+      pushOutput("error", "Debe indicar la ruta del input (.txt).");
+      return;
+    }
+
+    try {
+      setIsRunningAction(true);
+      pushOutput("info", "Ejecutando lexer generado...");
+
+      const response = await runYalex({
+        workspaceRoot,
+        action: "executeGeneratedLexer",
+        lexerPath: generateOutputPath,
+        inputPath: inputFilePath,
+      });
+
+      const parsed = response as { ok: boolean; result?: unknown; error?: string };
+      if (!parsed.ok) {
+        pushOutput("error", parsed.error || "Error ejecutando lexer generado.");
+        return;
+      }
+
+      const result = (parsed.result ?? {}) as Record<string, unknown>;
+      const success = Boolean(result.success);
+      const exitCode = Number(result.exitCode ?? -1);
+      const tokenCount = Number(result.tokenCount ?? 0);
+      const lexicalErrorCount = Number(result.lexicalErrorCount ?? 0);
+
+      const formatted = JSON.stringify(parsed.result, null, 2);
+      setLatestResult(formatted);
+      setActionResults((prev) => ({ ...prev, executeGeneratedLexer: formatted }));
+      setActionResultObjects((prev) => ({ ...prev, executeGeneratedLexer: parsed.result }));
+      setActiveResultAction("executeGeneratedLexer");
+
+      if (success) {
+        pushOutput(
+          "ok",
+          `Lexer generado ejecutado correctamente (exit=${exitCode}, tokens=${tokenCount}, errors=${lexicalErrorCount}).`
+        );
+      } else {
+        pushOutput(
+          "error",
+          `Lexer generado terminó con fallo (exit=${exitCode}, tokens=${tokenCount}, errors=${lexicalErrorCount}).`
+        );
+      }
+    } catch (error) {
+      pushOutput("error", `Fallo ejecutando lexer generado: ${String(error)}`);
+    } finally {
+      setIsRunningAction(false);
+    }
+  }
+
   function renderRegexNodeTree(node: unknown, keyPrefix: string): JSX.Element {
     const obj = asObject(node);
     if (!obj) {
@@ -1509,10 +1570,10 @@ export function App() {
 
               <button
                 className="run-check-btn"
-                onClick={() => runValidationFromCurrentResults()}
+                onClick={() => void runGeneratedLexerProgram()}
                 disabled={isRunningAction}
               >
-                Validar resultados actuales
+                Ejecutar lexer generado
               </button>
 
               {validationChecks.length > 0 && (

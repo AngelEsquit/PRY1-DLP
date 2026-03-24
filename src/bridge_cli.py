@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -109,6 +110,44 @@ def _run_action(payload: dict) -> dict:
 
     if action is None:
         raise ValueError("Falta campo 'action' en request")
+
+    if action == "executeGeneratedLexer":
+        lexer_path_raw = payload.get("lexerPath")
+        input_path_raw = payload.get("inputPath")
+
+        if not lexer_path_raw:
+            raise ValueError("Para ejecutar lexer generado debe enviar 'lexerPath'")
+        if not input_path_raw:
+            raise ValueError("Para ejecutar lexer generado debe enviar 'inputPath'")
+
+        lexer_path = _normalize_path(str(lexer_path_raw))
+        input_path = _normalize_path(str(input_path_raw))
+
+        if not lexer_path.exists():
+            raise FileNotFoundError(f"Lexer generado no encontrado: {lexer_path}")
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input no encontrado: {input_path}")
+
+        result = subprocess.run(
+            [sys.executable, str(lexer_path), str(input_path)],
+            capture_output=True,
+            text=True,
+        )
+
+        stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
+        token_lines = [line for line in stdout_lines if line.startswith("Token(")]
+        error_lines = [line for line in stdout_lines if line.startswith("Error léxico")]
+
+        return {
+            "success": result.returncode == 0,
+            "exitCode": result.returncode,
+            "tokenCount": len(token_lines),
+            "lexicalErrorCount": len(error_lines),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "lexerPath": str(lexer_path),
+            "inputPath": str(input_path),
+        }
 
     if yal_source_raw is not None:
         source = str(yal_source_raw)
