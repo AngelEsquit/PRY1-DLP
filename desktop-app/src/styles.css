@@ -740,39 +740,114 @@ button {
   font-size: 10px;
 }
 
-.ast-tree,
-.ast-node-children {
+.ast-vis-wrap {
+  overflow: auto;
+  padding: 10px;
+  --ast-connector-x-offset: -4px;
+}
+
+.ast-vis-tree,
+.ast-vis-children {
   list-style: none;
   margin: 0;
-  padding-left: 14px;
+  padding: 0;
 }
 
-.ast-tree {
-  padding: 10px;
+.ast-vis-tree {
+  display: flex;
+  justify-content: center;
+  min-width: 100%;
 }
 
-.ast-tree li {
+.ast-vis-item {
   position: relative;
-  margin: 4px 0;
+  text-align: center;
+  padding: 16px 8px 0;
 }
 
-.ast-tree li::before {
+.ast-vis-children {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  padding-top: 16px;
+}
+
+.ast-vis-children::before {
   content: "";
   position: absolute;
-  left: -10px;
-  top: 10px;
-  width: 8px;
-  border-top: 1px solid #42557d;
+  top: 0;
+  left: calc(50% + var(--ast-connector-x-offset));
+  width: 0;
+  height: 16px;
+  border-left: 1px solid #48618e;
 }
 
-.ast-node-label {
-  display: inline-block;
-  border: 1px solid #42557d;
-  border-radius: 4px;
-  background: #1e2a42;
-  color: #d7e8ff;
-  font-size: 11px;
-  padding: 3px 6px;
+.ast-vis-item::before,
+.ast-vis-item::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: calc(50% - var(--ast-connector-x-offset));
+  width: 50%;
+  height: 16px;
+  border-top: 1px solid #48618e;
+}
+
+.ast-vis-item::after {
+  left: calc(50% + var(--ast-connector-x-offset));
+  right: auto;
+  border-left: 1px solid #48618e;
+}
+
+.ast-vis-tree > .ast-vis-item::before,
+.ast-vis-tree > .ast-vis-item::after {
+  display: none;
+}
+
+.ast-vis-item:only-child::before,
+.ast-vis-item:only-child::after {
+  display: none;
+}
+
+.ast-vis-item:only-child {
+  padding-top: 0;
+}
+
+.ast-vis-item:first-child::before,
+.ast-vis-item:last-child::after {
+  border: 0;
+}
+
+.ast-vis-item:last-child::before {
+  border-right: 1px solid #48618e;
+  border-radius: 0 6px 0 0;
+}
+
+.ast-vis-tree::after,
+.ast-vis-children::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.ast-vis-node {
+  display: inline-flex;
+  min-width: 28px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #45608f;
+  background: #1a273e;
+  color: #e7f0ff;
+  font-size: 13px;
+  font-family: "Consolas", "Cascadia Code", monospace;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
 }
 
 .output-panel {

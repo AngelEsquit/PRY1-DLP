@@ -3,7 +3,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import Editor, { loader, type Monaco } from "@monaco-editor/react";
@@ -849,34 +848,185 @@ export function App() {
     }
   }
 
-  function renderRegexNodeTree(node: unknown, keyPrefix: string): JSX.Element {
+  function cloneAstNode(node: unknown): unknown {
+    return JSON.parse(JSON.stringify(node));
+  }
+
+  function normalizeAstForDisplay(node: unknown): unknown {
     const obj = asObject(node);
     if (!obj) {
-      return <li key={keyPrefix}>Nodo inválido</li>;
+      return node;
     }
 
-    const nodeType = asString(obj.type) ?? "node";
-    const labelValue =
-      asString(obj.value) ?? asString(obj.name) ?? asString(obj.operator) ?? nodeType;
+    const type = asString(obj.type) ?? "";
 
-    const children: ReactNode[] = [];
-    if (obj.operand) {
-      children.push(renderRegexNodeTree(obj.operand, `${keyPrefix}-operand`));
+    if (type === "concat") {
+      const parts = asArray(obj.parts).map((part) => normalizeAstForDisplay(part));
+      if (parts.length <= 1) {
+        return parts[0] ?? obj;
+      }
+
+      let acc = parts[0];
+      for (let index = 1; index < parts.length; index++) {
+        acc = {
+          type: "binary",
+          operator: ".",
+          left: acc,
+          right: parts[index],
+        };
+      }
+      return acc;
     }
-    if (obj.left) {
-      children.push(renderRegexNodeTree(obj.left, `${keyPrefix}-left`));
+
+    if (type === "unary") {
+      const operator = asString(obj.operator) ?? "";
+      const operand = normalizeAstForDisplay(obj.operand);
+
+      if (operator === "+") {
+        // Desugar a+ as CONCAT(a, KLEENE(a)) for fundamental-ops view.
+        return {
+          type: "binary",
+          operator: ".",
+          left: operand,
+          right: {
+            type: "unary",
+            operator: "*",
+            operand: cloneAstNode(operand),
+          },
+        };
+      }
+
+      return {
+        ...obj,
+        operand,
+      };
     }
-    if (obj.right) {
-      children.push(renderRegexNodeTree(obj.right, `${keyPrefix}-right`));
+
+    if (type === "binary") {
+      return {
+        ...obj,
+        left: normalizeAstForDisplay(obj.left),
+        right: normalizeAstForDisplay(obj.right),
+      };
     }
-    for (const [index, part] of asArray(obj.parts).entries()) {
-      children.push(renderRegexNodeTree(part, `${keyPrefix}-part-${index}`));
+
+    return obj;
+  }
+
+  function astNodeLabel(node: unknown): string {
+    const obj = asObject(node);
+    if (!obj) {
+      return "?";
     }
+
+    const type = asString(obj.type) ?? "node";
+
+    if (type === "binary") {
+      const operator = asString(obj.operator) ?? "?";
+      if (operator === ".") return "•";
+      if (operator === "|" || operator === "/") return "|";
+      if (operator === "#") return "#";
+      return operator;
+    }
+
+    if (type === "unary") {
+      const operator = asString(obj.operator) ?? "?";
+      if (operator === "*") return "*";
+      if (operator === "+") return "+";
+      if (operator === "?") return "?";
+      return operator;
+    }
+
+    if (type === "literal") {
+      return asString(obj.value) ?? "LITERAL";
+    }
+
+    if (type === "identifier") {
+      return asString(obj.name) ?? "IDENTIFIER";
+    }
+
+    if (type === "string") {
+      return `"${asString(obj.value) ?? ""}"`;
+    }
+
+    if (type === "charset") {
+      return Boolean(obj.negated) ? "[^]" : "[]";
+    }
+
+    if (type === "wildcard") {
+      return "_";
+    }
+
+    if (type === "concat") {
+      return "•";
+    }
+
+    return type;
+  }
+
+  function astChildren(node: unknown): unknown[] {
+    const obj = asObject(node);
+    if (!obj) {
+      return [];
+    }
+
+    const type = asString(obj.type) ?? "";
+    if (type === "binary") {
+      const children: unknown[] = [];
+      if (obj.left) children.push(obj.left);
+      if (obj.right) children.push(obj.right);
+      return children;
+    }
+
+    if (type === "unary") {
+      return obj.operand ? [obj.operand] : [];
+    }
+
+    if (type === "concat") {
+      return asArray(obj.parts);
+    }
+
+    return [];
+  }
+
+  function appendEndMarkerForDirectMethod(node: unknown): unknown {
+    const normalized = normalizeAstForDisplay(node);
+    const root = asObject(normalized);
+
+    if (
+      root &&
+      asString(root.type) === "binary" &&
+      asString(root.operator) === "." &&
+      asObject(root.right) &&
+      asString(asObject(root.right)?.type) === "identifier" &&
+      asString(asObject(root.right)?.name) === "$END$"
+    ) {
+      return normalized;
+    }
+
+    return {
+      type: "binary",
+      operator: ".",
+      left: normalized,
+      right: {
+        type: "identifier",
+        name: "$END$",
+      },
+    };
+  }
+
+  function renderAstVisualTree(node: unknown, keyPrefix: string): JSX.Element {
+    const label = astNodeLabel(node);
+    const children = astChildren(node);
 
     return (
-      <li key={keyPrefix}>
-        <span className="ast-node-label">{`${nodeType}: ${labelValue}`}</span>
-        {children.length > 0 && <ul className="ast-node-children">{children}</ul>}
+      <li key={keyPrefix} className="ast-vis-item">
+        <div className="ast-vis-node">{label}</div>
+        {children.length > 0 && (
+          <ul className="ast-vis-children">
+            {children.map((child, index) => renderAstVisualTree(child, `${keyPrefix}-${index}`))}
+          </ul>
+        )}
       </li>
     );
   }
@@ -896,7 +1046,9 @@ export function App() {
       sections.push(
         <section key={`let-${name}`} className="graph-panel">
           <h4>{`AST let: ${name}`}</h4>
-          <ul className="ast-tree">{renderRegexNodeTree(letObj.ast, `let-${name}`)}</ul>
+          <div className="ast-vis-wrap">
+            <ul className="ast-vis-tree">{renderAstVisualTree(normalizeAstForDisplay(letObj.ast), `let-${name}`)}</ul>
+          </div>
         </section>
       );
     }
@@ -905,10 +1057,15 @@ export function App() {
       const altObj = asObject(altItem);
       if (!altObj) continue;
       const index = asNumber(altObj.index);
+      const astWithEnd = appendEndMarkerForDirectMethod(altObj.ast);
       sections.push(
         <section key={`alt-${index ?? "?"}`} className="graph-panel">
           <h4>{`AST alternativa ${index ?? "?"}`}</h4>
-          <ul className="ast-tree">{renderRegexNodeTree(altObj.ast, `alt-${index ?? "?"}`)}</ul>
+          <div className="ast-vis-wrap">
+            <ul className="ast-vis-tree">
+              {renderAstVisualTree(astWithEnd, `alt-${index ?? "?"}`)}
+            </ul>
+          </div>
         </section>
       );
     }
