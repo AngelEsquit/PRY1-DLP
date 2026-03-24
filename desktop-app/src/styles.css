@@ -741,9 +741,13 @@ button {
 }
 
 .ast-vis-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible;
   padding: 10px;
   --ast-connector-x-offset: -4px;
+  display: flex;
+  align-items: flex-start;
+  min-height: fit-content;
 }
 
 .ast-vis-tree,
@@ -756,7 +760,9 @@ button {
 .ast-vis-tree {
   display: flex;
   justify-content: center;
-  min-width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: fit-content;
 }
 
 .ast-vis-item {
@@ -848,6 +854,65 @@ button {
   white-space: nowrap;
   position: relative;
   z-index: 1;
+}
+
+.direct-view {
+  display: grid;
+  gap: 10px;
+}
+
+.direct-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.direct-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #181c26;
+  overflow: hidden;
+}
+
+.direct-card h4 {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: #d8e6ff;
+}
+
+.direct-kv {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #dbe6ff;
+  font-family: "Consolas", "Cascadia Code", monospace;
+}
+
+.direct-table-wrap {
+  overflow: auto;
+}
+
+.direct-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: "Consolas", "Cascadia Code", monospace;
+}
+
+.direct-table th,
+.direct-table td {
+  border-bottom: 1px solid #2e3a52;
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+}
+
+.direct-table th {
+  background: #1f2a3f;
+  color: #d6e4ff;
+  position: sticky;
+  top: 0;
 }
 
 .output-panel {

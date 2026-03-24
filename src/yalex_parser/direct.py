@@ -24,17 +24,32 @@ class DirectAcceptPosition:
 
 
 @dataclass
+class DirectNodeMetric:
+    node_id: int
+    label: str
+    nullable: bool
+    firstpos: set[int]
+    lastpos: set[int]
+    children: list[int] = field(default_factory=list)
+
+
+@dataclass
 class DirectArtifacts:
     dfa: DFA
     start_positions: frozenset[int]
     alphabet: list[str]
+    root_nullable: bool = False
+    root_firstpos: frozenset[int] = field(default_factory=frozenset)
+    root_lastpos: frozenset[int] = field(default_factory=frozenset)
     followpos: dict[int, set[int]] = field(default_factory=dict)
     position_chars: dict[int, frozenset[str]] = field(default_factory=dict)
     accept_positions: list[DirectAcceptPosition] = field(default_factory=list)
+    node_metrics: list[DirectNodeMetric] = field(default_factory=list)
 
 
 @dataclass
 class _Analysis:
+    node_id: int
     nullable: bool
     firstpos: set[int]
     lastpos: set[int]
@@ -57,6 +72,26 @@ class _Epsilon:
 
 
 _ASCII_UNIVERSE: frozenset[str] = frozenset(chr(i) for i in range(128))
+
+
+def _node_label(node) -> str:
+    if isinstance(node, _Epsilon):
+        return "ε"
+    if isinstance(node, _SymbolLeaf):
+        if len(node.chars) == 1:
+            return repr(next(iter(node.chars)))
+        return "SYMBOL_SET"
+    if isinstance(node, _EndLeaf):
+        return "$END$"
+    if isinstance(node, BinaryNode):
+        if node.operator in ("|", "/"):
+            return "|"
+        return node.operator
+    if isinstance(node, UnaryNode):
+        return node.operator
+    if isinstance(node, ConcatNode):
+        return "•"
+    return type(node).__name__
 
 
 def _charset_to_chars(node: CharSetNode) -> frozenset[str]:
@@ -189,16 +224,43 @@ def _analyze(
     position_chars: dict[int, frozenset[str]],
     position_accept: dict[int, DirectAcceptPosition],
     next_position: list[int],
+    node_metrics: list[DirectNodeMetric],
+    next_node_id: list[int],
 ) -> _Analysis:
+    node_id = next_node_id[0]
+    next_node_id[0] += 1
+
     if isinstance(node, _Epsilon):
-        return _Analysis(nullable=True, firstpos=set(), lastpos=set())
+        result = _Analysis(node_id=node_id, nullable=True, firstpos=set(), lastpos=set())
+        node_metrics.append(
+            DirectNodeMetric(
+                node_id=node_id,
+                label=_node_label(node),
+                nullable=result.nullable,
+                firstpos=set(result.firstpos),
+                lastpos=set(result.lastpos),
+                children=[],
+            )
+        )
+        return result
 
     if isinstance(node, _SymbolLeaf):
         pos = next_position[0]
         next_position[0] += 1
         followpos.setdefault(pos, set())
         position_chars[pos] = node.chars
-        return _Analysis(nullable=False, firstpos={pos}, lastpos={pos})
+        result = _Analysis(node_id=node_id, nullable=False, firstpos={pos}, lastpos={pos})
+        node_metrics.append(
+            DirectNodeMetric(
+                node_id=node_id,
+                label=_node_label(node),
+                nullable=result.nullable,
+                firstpos=set(result.firstpos),
+                lastpos=set(result.lastpos),
+                children=[],
+            )
+        )
+        return result
 
     if isinstance(node, _EndLeaf):
         pos = next_position[0]
@@ -206,41 +268,155 @@ def _analyze(
         followpos.setdefault(pos, set())
         position_chars[pos] = frozenset()
         position_accept[pos] = DirectAcceptPosition(position=pos, label=node.label, priority=node.priority)
-        return _Analysis(nullable=False, firstpos={pos}, lastpos={pos})
+        result = _Analysis(node_id=node_id, nullable=False, firstpos={pos}, lastpos={pos})
+        node_metrics.append(
+            DirectNodeMetric(
+                node_id=node_id,
+                label=_node_label(node),
+                nullable=result.nullable,
+                firstpos=set(result.firstpos),
+                lastpos=set(result.lastpos),
+                children=[],
+            )
+        )
+        return result
 
     if isinstance(node, BinaryNode) and node.operator in ("|", "/"):
-        left = _analyze(node.left, followpos, position_chars, position_accept, next_position)
-        right = _analyze(node.right, followpos, position_chars, position_accept, next_position)
-        return _Analysis(
+        left = _analyze(
+            node.left,
+            followpos,
+            position_chars,
+            position_accept,
+            next_position,
+            node_metrics,
+            next_node_id,
+        )
+        right = _analyze(
+            node.right,
+            followpos,
+            position_chars,
+            position_accept,
+            next_position,
+            node_metrics,
+            next_node_id,
+        )
+        result = _Analysis(
+            node_id=node_id,
             nullable=left.nullable or right.nullable,
             firstpos=left.firstpos | right.firstpos,
             lastpos=left.lastpos | right.lastpos,
         )
+        node_metrics.append(
+            DirectNodeMetric(
+                node_id=node_id,
+                label=_node_label(node),
+                nullable=result.nullable,
+                firstpos=set(result.firstpos),
+                lastpos=set(result.lastpos),
+                children=[left.node_id, right.node_id],
+            )
+        )
+        return result
 
     if isinstance(node, UnaryNode):
-        base = _analyze(node.operand, followpos, position_chars, position_accept, next_position)
+        base = _analyze(
+            node.operand,
+            followpos,
+            position_chars,
+            position_accept,
+            next_position,
+            node_metrics,
+            next_node_id,
+        )
 
         if node.operator == "*":
             for p in base.lastpos:
                 followpos.setdefault(p, set()).update(base.firstpos)
-            return _Analysis(nullable=True, firstpos=set(base.firstpos), lastpos=set(base.lastpos))
+            result = _Analysis(
+                node_id=node_id,
+                nullable=True,
+                firstpos=set(base.firstpos),
+                lastpos=set(base.lastpos),
+            )
+            node_metrics.append(
+                DirectNodeMetric(
+                    node_id=node_id,
+                    label=_node_label(node),
+                    nullable=result.nullable,
+                    firstpos=set(result.firstpos),
+                    lastpos=set(result.lastpos),
+                    children=[base.node_id],
+                )
+            )
+            return result
 
         if node.operator == "+":
             for p in base.lastpos:
                 followpos.setdefault(p, set()).update(base.firstpos)
-            return _Analysis(nullable=base.nullable, firstpos=set(base.firstpos), lastpos=set(base.lastpos))
+            result = _Analysis(
+                node_id=node_id,
+                nullable=base.nullable,
+                firstpos=set(base.firstpos),
+                lastpos=set(base.lastpos),
+            )
+            node_metrics.append(
+                DirectNodeMetric(
+                    node_id=node_id,
+                    label=_node_label(node),
+                    nullable=result.nullable,
+                    firstpos=set(result.firstpos),
+                    lastpos=set(result.lastpos),
+                    children=[base.node_id],
+                )
+            )
+            return result
 
         if node.operator == "?":
-            return _Analysis(nullable=True, firstpos=set(base.firstpos), lastpos=set(base.lastpos))
+            result = _Analysis(
+                node_id=node_id,
+                nullable=True,
+                firstpos=set(base.firstpos),
+                lastpos=set(base.lastpos),
+            )
+            node_metrics.append(
+                DirectNodeMetric(
+                    node_id=node_id,
+                    label=_node_label(node),
+                    nullable=result.nullable,
+                    firstpos=set(result.firstpos),
+                    lastpos=set(result.lastpos),
+                    children=[base.node_id],
+                )
+            )
+            return result
 
         raise ValueError(f"Operador unario no soportado: {node.operator}")
 
     if isinstance(node, ConcatNode):
         if not node.parts:
-            return _Analysis(nullable=True, firstpos=set(), lastpos=set())
+            result = _Analysis(node_id=node_id, nullable=True, firstpos=set(), lastpos=set())
+            node_metrics.append(
+                DirectNodeMetric(
+                    node_id=node_id,
+                    label=_node_label(node),
+                    nullable=result.nullable,
+                    firstpos=set(result.firstpos),
+                    lastpos=set(result.lastpos),
+                    children=[],
+                )
+            )
+            return result
 
         analyses = [
-            _analyze(part, followpos, position_chars, position_accept, next_position)
+            _analyze(
+                part,
+                followpos,
+                position_chars,
+                position_accept,
+                next_position,
+                node_metrics,
+                next_node_id,
+            )
             for part in node.parts
         ]
 
@@ -264,7 +440,18 @@ def _analyze(
             if not info.nullable:
                 break
 
-        return _Analysis(nullable=nullable, firstpos=firstpos, lastpos=lastpos)
+        result = _Analysis(node_id=node_id, nullable=nullable, firstpos=firstpos, lastpos=lastpos)
+        node_metrics.append(
+            DirectNodeMetric(
+                node_id=node_id,
+                label=_node_label(node),
+                nullable=result.nullable,
+                firstpos=set(result.firstpos),
+                lastpos=set(result.lastpos),
+                children=[analysis.node_id for analysis in analyses],
+            )
+        )
+        return result
 
     raise ValueError(f"Nodo no soportado en análisis directo: {type(node).__name__}")
 
@@ -309,12 +496,15 @@ def build_direct_artifacts(
     followpos: dict[int, set[int]] = {}
     position_chars: dict[int, frozenset[str]] = {}
     position_accept: dict[int, DirectAcceptPosition] = {}
+    node_metrics: list[DirectNodeMetric] = []
     analysis = _analyze(
         full_root,
         followpos=followpos,
         position_chars=position_chars,
         position_accept=position_accept,
         next_position=[1],
+        node_metrics=node_metrics,
+        next_node_id=[1],
     )
 
     alphabet = sorted(
@@ -387,9 +577,13 @@ def build_direct_artifacts(
         dfa=dfa,
         start_positions=start_positions,
         alphabet=alphabet,
+        root_nullable=analysis.nullable,
+        root_firstpos=frozenset(analysis.firstpos),
+        root_lastpos=frozenset(analysis.lastpos),
         followpos=followpos,
         position_chars=position_chars,
         accept_positions=sorted(position_accept.values(), key=lambda x: x.position),
+        node_metrics=sorted(node_metrics, key=lambda item: item.node_id),
     )
 
 
@@ -402,6 +596,9 @@ def build_direct_dfa(
 
 def direct_artifacts_to_dict(artifacts: DirectArtifacts) -> dict:
     return {
+        "root_nullable": artifacts.root_nullable,
+        "root_firstpos": sorted(artifacts.root_firstpos),
+        "root_lastpos": sorted(artifacts.root_lastpos),
         "start_positions": sorted(artifacts.start_positions),
         "alphabet_size": len(artifacts.alphabet),
         "followpos": {
@@ -425,5 +622,16 @@ def direct_artifacts_to_dict(artifacts: DirectArtifacts) -> dict:
                 "priority": meta.priority,
             }
             for meta in artifacts.accept_positions
+        ],
+        "node_metrics": [
+            {
+                "node_id": metric.node_id,
+                "label": metric.label,
+                "nullable": metric.nullable,
+                "firstpos": sorted(metric.firstpos),
+                "lastpos": sorted(metric.lastpos),
+                "children": metric.children,
+            }
+            for metric in sorted(artifacts.node_metrics, key=lambda item: item.node_id)
         ],
     }

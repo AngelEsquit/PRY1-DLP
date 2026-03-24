@@ -660,7 +660,7 @@ export function App() {
 
   const activeResultObject = activeResultAction ? actionResultObjects[activeResultAction] : null;
 
-  const graphSupportedActions: YalexAction[] = ["ast", "dfa"];
+  const graphSupportedActions: YalexAction[] = ["ast", "dfa", "combinedNfa"];
   const canRenderGraph = Boolean(
     activeResultAction && graphSupportedActions.includes(activeResultAction) && activeResultObject
   );
@@ -1039,15 +1039,28 @@ export function App() {
     }
 
     const sections: JSX.Element[] = [];
-    for (const letItem of asArray(regexAst.lets)) {
-      const letObj = asObject(letItem);
-      if (!letObj) continue;
-      const name = asString(letObj.name) ?? "let";
+
+    const combinedAlternativeAsts = asArray(regexAst.rule_alternatives)
+      .map((altItem) => asObject(altItem))
+      .filter((altObj): altObj is Record<string, unknown> => altObj !== null)
+      .map((altObj) => appendEndMarkerForDirectMethod(altObj.ast));
+
+    if (combinedAlternativeAsts.length > 0) {
+      const combinedRoot = combinedAlternativeAsts.reduce((acc, current) => {
+        if (acc === null) return current;
+        return {
+          type: "binary",
+          operator: "|",
+          left: acc,
+          right: current,
+        };
+      }, null as unknown);
+
       sections.push(
-        <section key={`let-${name}`} className="graph-panel">
-          <h4>{`AST let: ${name}`}</h4>
+        <section key="ast-combined-direct" className="graph-panel">
+          <h4>AST combinado (metodo directo)</h4>
           <div className="ast-vis-wrap">
-            <ul className="ast-vis-tree">{renderAstVisualTree(normalizeAstForDisplay(letObj.ast), `let-${name}`)}</ul>
+            <ul className="ast-vis-tree">{renderAstVisualTree(combinedRoot, "combined-direct")}</ul>
           </div>
         </section>
       );
@@ -1071,6 +1084,162 @@ export function App() {
     }
 
     return <div className="graph-panels">{sections.length > 0 ? sections : <div className="graph-empty">Sin nodos AST.</div>}</div>;
+  }
+
+  function formatPositionSet(value: unknown): string {
+    const positions = asArray(value)
+      .map((item) => asNumber(item))
+      .filter((item): item is number => item !== null)
+      .sort((a, b) => a - b);
+
+    return `{${positions.join(", ")}}`;
+  }
+
+  function renderDirectConstructionView(payload: unknown): JSX.Element {
+    const root = asObject(payload);
+    const direct = root ? asObject(root.direct_construction) : null;
+    if (!direct) {
+      return <div className="graph-empty">No hay artefactos de construcción directa disponibles.</div>;
+    }
+
+    const rootNullable = Boolean(direct.root_nullable);
+    const rootFirstpos = formatPositionSet(direct.root_firstpos);
+    const rootLastpos = formatPositionSet(direct.root_lastpos);
+    const startPositions = formatPositionSet(direct.start_positions);
+    const alphabetSize = asNumber(direct.alphabet_size) ?? 0;
+
+    const followRaw = asObject(direct.followpos) ?? {};
+    const followEntries = Object.entries(followRaw)
+      .map(([position, targets]) => ({
+        position: Number(position),
+        targets: formatPositionSet(targets),
+      }))
+      .sort((a, b) => a.position - b.position);
+
+    const positions = asArray(direct.positions)
+      .map((item) => asObject(item))
+      .filter((item): item is Record<string, unknown> => item !== null)
+      .sort((a, b) => (asNumber(a.position) ?? 0) - (asNumber(b.position) ?? 0));
+
+    const nodeMetrics = asArray(direct.node_metrics)
+      .map((item) => asObject(item))
+      .filter((item): item is Record<string, unknown> => item !== null)
+      .map((item) => ({
+        nodeId: asNumber(item.node_id) ?? -1,
+        label: asString(item.label) ?? "?",
+        nullable: Boolean(item.nullable),
+        firstposRaw: asArray(item.firstpos)
+          .map((value) => asNumber(value))
+          .filter((value): value is number => value !== null)
+          .sort((a, b) => a - b),
+        lastposRaw: asArray(item.lastpos)
+          .map((value) => asNumber(value))
+          .filter((value): value is number => value !== null)
+          .sort((a, b) => a - b),
+        firstpos: formatPositionSet(item.firstpos),
+        lastpos: formatPositionSet(item.lastpos),
+        children: asArray(item.children)
+          .map((child) => asNumber(child))
+          .filter((child): child is number => child !== null)
+          .sort((a, b) => a - b),
+      }))
+      .sort((a, b) => a.nodeId - b.nodeId);
+
+    const followByPosition = new Map<number, string>();
+    for (const entry of followEntries) {
+      followByPosition.set(entry.position, entry.targets);
+    }
+
+    const leafByPosition = new Map<number, { chars: string; marker: string }>();
+    for (const item of positions) {
+      const position = asNumber(item.position) ?? -1;
+      if (position < 0) continue;
+
+      const chars = asArray(item.chars)
+        .map((ch) => asString(ch))
+        .filter((ch): ch is string => ch !== null)
+        .map((ch) => formatCharLabel(ch));
+      const isAcceptMarker = Boolean(item.is_accept_marker);
+      const markerLabel = isAcceptMarker
+        ? `${asString(item.label) ?? "token"} (prio ${asNumber(item.priority) ?? "?"})`
+        : "-";
+
+      leafByPosition.set(position, {
+        chars: chars.length > 0 ? chars.join(" ") : "[]",
+        marker: markerLabel,
+      });
+    }
+
+    return (
+      <div className="direct-view">
+        <div className="direct-summary-grid">
+          <section className="direct-card">
+            <h4>Analisis Raiz</h4>
+            <div className="direct-kv"><strong>nullable:</strong> {rootNullable ? "true" : "false"}</div>
+            <div className="direct-kv"><strong>firstpos:</strong> {rootFirstpos}</div>
+            <div className="direct-kv"><strong>lastpos:</strong> {rootLastpos}</div>
+          </section>
+          <section className="direct-card">
+            <h4>Inicializacion</h4>
+            <div className="direct-kv"><strong>start_positions:</strong> {startPositions}</div>
+            <div className="direct-kv"><strong>alphabet_size:</strong> {alphabetSize}</div>
+          </section>
+        </div>
+
+        <section className="direct-card">
+          <h4>Tabla Completa (Arbol Combinado)</h4>
+          <div className="direct-table-wrap">
+            <table className="direct-table">
+              <thead>
+                <tr>
+                  <th>Nodo</th>
+                  <th>Pos</th>
+                  <th>Label</th>
+                  <th>nullable</th>
+                  <th>firstpos</th>
+                  <th>lastpos</th>
+                  <th>followpos</th>
+                  <th>chars</th>
+                  <th>marker</th>
+                  <th>children</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodeMetrics.map((entry) => {
+                  const isLeafPosition =
+                    entry.children.length === 0 &&
+                    entry.firstposRaw.length === 1 &&
+                    entry.lastposRaw.length === 1 &&
+                    entry.firstposRaw[0] === entry.lastposRaw[0];
+
+                  const position = isLeafPosition ? entry.firstposRaw[0] : null;
+                  const displayPosition = position !== null ? String(position) : "-";
+                  const followpos = position !== null ? (followByPosition.get(position) ?? "{}") : "-";
+                  const leafMeta = position !== null ? leafByPosition.get(position) : undefined;
+                  const chars = leafMeta?.chars ?? "-";
+                  const marker = leafMeta?.marker ?? "-";
+
+                  return (
+                    <tr key={`node-${entry.nodeId}`}>
+                      <td>{entry.nodeId}</td>
+                      <td>{displayPosition}</td>
+                      <td>{entry.label}</td>
+                      <td>{entry.nullable ? "true" : "false"}</td>
+                      <td>{entry.firstpos}</td>
+                      <td>{entry.lastpos}</td>
+                      <td>{followpos}</td>
+                      <td>{chars}</td>
+                      <td>{marker}</td>
+                      <td>{entry.children.length > 0 ? `{${entry.children.join(", ")}}` : "{}"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   function renderAutomatonSvg(panel: GraphPanel): JSX.Element {
@@ -1237,6 +1406,10 @@ export function App() {
 
     if (activeResultAction === "ast") {
       return renderAstGraph(activeResultObject);
+    }
+
+    if (activeResultAction === "combinedNfa") {
+      return renderDirectConstructionView(activeResultObject);
     }
 
     if (activeResultAction === "dfa") {
